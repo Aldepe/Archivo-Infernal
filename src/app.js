@@ -19,6 +19,13 @@ const SAVE_TIMEOUT_MS = 45000;
 const ACCEPTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 const ACCEPTED_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif"];
 const IMAGE_ACCEPT_ATTR = "image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif";
+const ACCEPTED_AUDIO_TYPES = new Set(["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/ogg", "audio/webm"]);
+const ACCEPTED_AUDIO_EXTENSIONS = [".mp3", ".wav", ".ogg", ".oga", ".webm"];
+const AUDIO_ACCEPT_ATTR = "audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/ogg,audio/webm,.mp3,.wav,.ogg,.oga,.webm";
+const ACCEPTED_VIDEO_TYPES = new Set(["video/mp4", "video/webm", "video/ogg"]);
+const ACCEPTED_VIDEO_EXTENSIONS = [".mp4", ".webm", ".ogv", ".ogg"];
+const VIDEO_ACCEPT_ATTR = "video/mp4,video/webm,video/ogg,.mp4,.webm,.ogv,.ogg";
+const MEDIA_LIMITS = { audio: 50 * 1024 * 1024, video: 120 * 1024 * 1024 };
 
 const loreTypes = {
   all: { label: "Todo", icon: "library" },
@@ -1027,6 +1034,7 @@ const state = {
   selectedStatsUserId: null,
   selectedCombatantId: null,
   selectedInventoryItemId: null,
+  contractFilterUserId: "all",
   bazaarMood: "welcome",
   rollingUserId: null,
   dieFace: 1,
@@ -1041,6 +1049,7 @@ app.addEventListener("input", onInput);
 app.addEventListener("change", onChange);
 app.addEventListener("pointerdown", onPointerDown);
 app.addEventListener("pointerover", onPointerOver);
+app.addEventListener("play", onMediaPlay, true);
 window.addEventListener("pointerup", stopMapPainting);
 
 init();
@@ -1578,6 +1587,8 @@ function renderLoreDetail(item) {
         </div>
       </div>
       ${renderTextSection("Descripcion", item.description)}
+      ${renderLoreVideoPlayer(details.video_url)}
+      ${item.type === "zone" ? renderZoneMusicPlayer(details.music_url) : ""}
       ${renderDetailFacts(item)}
       ${children.length ? renderLoreChildren(children, item) : ""}
       ${linked.length ? renderRelations(linked, item.id) : ""}
@@ -1586,9 +1597,34 @@ function renderLoreDetail(item) {
   `;
 }
 
+function renderLoreVideoPlayer(videoUrl) {
+  if (!videoUrl) return "";
+  return `
+    <div class="detail-section media-panel">
+      <h4>${icon("video")} Video explicativo</h4>
+      <video class="lore-video" controls preload="metadata" src="${escapeAttr(videoUrl)}"></video>
+    </div>
+  `;
+}
+
+function renderZoneMusicPlayer(audioUrl) {
+  if (!audioUrl) {
+    return isDM()
+      ? `<div class="detail-section media-panel media-empty"><h4>${icon("music")} Musica de zona</h4><p>Sin musica asignada.</p></div>`
+      : "";
+  }
+  return `
+    <div class="detail-section media-panel">
+      <h4>${icon("music")} Musica de zona</h4>
+      <audio class="zone-audio" controls loop preload="metadata" src="${escapeAttr(audioUrl)}"></audio>
+      <span class="inline-label">${icon("volume-2")} Reproduccion manual, con loop disponible desde el reproductor.</span>
+    </div>
+  `;
+}
+
 function renderDetailFacts(item) {
   const details = item.details || {};
-  const skip = new Set(["dm_notes", "memories", "source_path", "image_refs", "imported_from", "raw_markdown_kept", "dm_source_markdown"]);
+  const skip = new Set(["dm_notes", "memories", "source_path", "image_refs", "imported_from", "raw_markdown_kept", "dm_source_markdown", "video_url", "music_url"]);
   const entries = Object.entries(details).filter(([, value]) => Boolean(value));
   if (!entries.length) return "";
   return `
@@ -1701,6 +1737,28 @@ function renderLoreForm() {
           <span>Cargar imagen</span>
           <input name="image_file" type="file" accept="${IMAGE_ACCEPT_ATTR}" />
         </label>
+        <input type="hidden" name="current_video_url" value="${escapeAttr(details.video_url || "")}" />
+        <div class="media-upload-box">
+          <label class="field">
+            <span>Video explicativo</span>
+            <input name="video_file" type="file" accept="${VIDEO_ACCEPT_ATTR}" />
+          </label>
+          ${details.video_url ? `<label class="check-row"><input name="remove_video" type="checkbox" /> Quitar video actual</label>` : `<span class="inline-label">${icon("video")} Sin video asignado.</span>`}
+        </div>
+        ${
+          item?.type === "zone"
+            ? `
+              <input type="hidden" name="current_music_url" value="${escapeAttr(details.music_url || "")}" />
+              <div class="media-upload-box">
+                <label class="field">
+                  <span>Musica de fondo de la zona</span>
+                  <input name="music_file" type="file" accept="${AUDIO_ACCEPT_ATTR}" />
+                </label>
+                ${details.music_url ? `<label class="check-row"><input name="remove_music" type="checkbox" /> Quitar musica actual</label>` : `<span class="inline-label">${icon("music")} Sin musica asignada.</span>`}
+              </div>
+            `
+            : ""
+        }
         <div class="grid-2">
           <label class="field">
             <span>Carpeta / zona padre</span>
@@ -1900,6 +1958,7 @@ function renderStats(dmMode) {
 
   return `
     <section class="dm-stats-layout">
+      ${renderDMQuickActions(selectedUserId, selectedProfile)}
       <aside class="panel">
         <div class="panel-header">
           <h3>Personajes</h3>
@@ -1920,6 +1979,28 @@ function renderStats(dmMode) {
         </div>
       </div>
     </section>
+  `;
+}
+
+function renderDMQuickActions(selectedUserId, selectedProfile) {
+  const name = selectedProfile?.character_name || selectedProfile?.display_name || "player";
+  return `
+    <div class="panel dm-command-panel">
+      <div class="panel-header">
+        <h3>${icon("crown")} Centro de mando</h3>
+        <span class="status-pill">${icon("user-round")} ${escapeHtml(name)}</span>
+      </div>
+      <div class="panel-body">
+        <div class="dm-quick-grid">
+          <button type="button" class="quick-action-card danger" data-action="roll-stress" data-id="${escapeAttr(selectedUserId)}">${icon("dice-4")} <span>Tirar stress</span></button>
+          <button type="button" class="quick-action-card" data-action="request-initiative">${icon("megaphone")} <span>Pedir iniciativas</span></button>
+          <button type="button" class="quick-action-card" data-route="battlefield">${icon("swords")} <span>Campo batalla</span></button>
+          <button type="button" class="quick-action-card" data-route="lore">${icon("book-open")} <span>Editar lore</span></button>
+          <button type="button" class="quick-action-card" data-route="contracts">${icon("scroll-text")} <span>Pactos</span></button>
+          <button type="button" class="quick-action-card" data-route="dice">${icon("dice-6")} <span>Dados</span></button>
+        </div>
+      </div>
+    </div>
   `;
 }
 
@@ -2027,7 +2108,8 @@ function renderMemories(memories = []) {
   return `
     <div class="detail-section">
       <h4>${icon("brain")} Recuerdos</h4>
-      <div class="memory-grid">
+      <div class="memory-scroll">
+        <div class="memory-grid">
         ${visible
           .map(
             (memory) => `
@@ -2039,6 +2121,7 @@ function renderMemories(memories = []) {
             `,
           )
           .join("")}
+        </div>
       </div>
     </div>
   `;
@@ -2074,7 +2157,8 @@ function renderMemoryAdmin(profile) {
   return `
     <div class="detail-section">
       <h4>${icon("skull")} Control de recuerdos</h4>
-      <div class="memory-grid">
+      <div class="memory-scroll">
+        <div class="memory-grid">
         ${memories
           .map(
             (memory) => `
@@ -2088,6 +2172,7 @@ function renderMemoryAdmin(profile) {
             `,
           )
           .join("")}
+        </div>
       </div>
     </div>
   `;
@@ -3018,7 +3103,11 @@ function storageLabel(slot, ownerId = "") {
 function renderContracts() {
   const editing = state.data.contracts.find((contract) => contract.id === state.editingContractId);
   const ownerId = editing?.user_id || (isDM() ? state.selectedStatsUserId || state.data.profiles.find((p) => p.role !== "dm")?.id : state.session.user.id);
-  const contracts = state.data.contracts.filter((contract) => isDM() || contract.user_id === state.session.user.id);
+  const players = state.data.profiles.filter((profile) => profile.role !== "dm");
+  const filterUserId = isDM() ? state.contractFilterUserId || "all" : state.session.user.id;
+  const contracts = state.data.contracts
+    .filter((contract) => isDM() || contract.user_id === state.session.user.id)
+    .filter((contract) => filterUserId === "all" || contract.user_id === filterUserId || (contract.user_ids || []).includes(filterUserId));
   return `
     <section class="contracts-layout contracts-screen">
       <aside class="panel"><div class="panel-header"><h3>${editing ? "Editar pacto" : "Nuevo pacto"}</h3></div><div class="panel-body">${isDM() ? renderOwnerPicker(ownerId) : ""}${renderContractForm(ownerId, editing)}</div></aside>
@@ -3029,9 +3118,25 @@ function renderContracts() {
           <span class="ritual-sigil sigil-b"></span>
           <span class="ritual-embers"></span>
         </div>
-        <div class="contracts-board">${contracts.length ? contracts.map(renderContractCard).join("") : renderEmpty("Aun no hay pactos escritos.")}</div>
+        ${isDM() ? renderContractFilter(players, filterUserId, contracts.length) : ""}
+        <div class="contracts-board">${contracts.length ? contracts.map(renderContractCard).join("") : renderEmpty(filterUserId === "all" ? "Aun no hay pactos escritos." : "Ese player no tiene pactos sellados.")}</div>
       </div>
     </section>
+  `;
+}
+
+function renderContractFilter(players, selectedUserId, count) {
+  return `
+    <div class="contract-filter-bar">
+      <label class="field compact-select">
+        <span>${icon("filter")} Filtrar pactos</span>
+        <select data-action="filter-contracts">
+          <option value="all" ${selectedUserId === "all" ? "selected" : ""}>Todos</option>
+          ${players.map((profile) => `<option value="${profile.id}" ${selectedUserId === profile.id ? "selected" : ""}>${escapeHtml(profile.character_name || profile.display_name)}</option>`).join("")}
+        </select>
+      </label>
+      <span class="status-pill">${icon("scroll-text")} ${count} visibles</span>
+    </div>
   `;
 }
 
@@ -4428,6 +4533,11 @@ async function onChange(event) {
       render();
       return;
     }
+    if (action?.dataset.action === "filter-contracts") {
+      state.contractFilterUserId = event.target.value || "all";
+      render({ preserveScroll: true });
+      return;
+    }
     if (action?.dataset.action === "select-active-map") {
       await setActiveBattleMap(event.target.value);
     }
@@ -4436,6 +4546,14 @@ async function onChange(event) {
     showToast(friendlyErrorMessage(error, "No se pudo aplicar el cambio."), "error");
     render();
   }
+}
+
+function onMediaPlay(event) {
+  const current = event.target;
+  if (!current?.matches?.("audio, video")) return;
+  app.querySelectorAll("audio, video").forEach((media) => {
+    if (media !== current && !media.paused) media.pause();
+  });
 }
 
 async function signIn(formData) {
@@ -4747,12 +4865,19 @@ async function saveLore(formData) {
   ensureDM();
   const id = String(formData.get("id") || "");
   const imageUrl = await resolveImageInput(formData, "image_file", String(formData.get("current_image_url") || "").trim(), "lore");
-  const details = {};
   const type = String(formData.get("type") || "character");
+  const videoUrl = await resolveMediaInput(formData, "video_file", String(formData.get("current_video_url") || "").trim(), "video", "videos", "remove_video");
+  const musicUrl =
+    type === "zone"
+      ? await resolveMediaInput(formData, "music_file", String(formData.get("current_music_url") || "").trim(), "audio", "zone-music", "remove_music")
+      : "";
+  const details = {};
   (loreDetailFields[type] || loreDetailFields.other).forEach(([key]) => {
     const value = String(formData.get(key) || "").trim();
     if (value) details[key] = value;
   });
+  if (videoUrl) details.video_url = videoUrl;
+  if (type === "zone" && musicUrl) details.music_url = musicUrl;
   const payload = compact({
     id: id || undefined,
     type,
@@ -6866,6 +6991,13 @@ async function resolveImageInput(formData, fileField, currentUrl, folder) {
   return currentUrl;
 }
 
+async function resolveMediaInput(formData, fileField, currentUrl, kind, folder, removeField = "") {
+  const file = formData.get(fileField);
+  if (hasFile(file)) return uploadMedia(file, folder, kind);
+  if (removeField && formData.has(removeField)) return "";
+  return currentUrl;
+}
+
 async function uploadImage(file, folder) {
   if (!hasFile(file)) return "";
   validateImageFile(file);
@@ -6888,12 +7020,52 @@ async function uploadImage(file, folder) {
   return data.publicUrl;
 }
 
+async function uploadMedia(file, folder, kind) {
+  if (!hasFile(file)) return "";
+  validateMediaFile(file, kind);
+  if (!hasSupabase) return blobToDataUrl(file);
+
+  const extension = mediaExtension(file, kind);
+  const path = `${folder}/${state.session.user.id}/${Date.now()}-${uuid()}${extension}`;
+  const { error } = await withTimeout(
+    supabase.storage.from(IMAGE_BUCKET).upload(path, file, {
+      cacheControl: "3600",
+      contentType: file.type || (kind === "audio" ? "audio/mpeg" : "video/mp4"),
+      upsert: true,
+    }),
+    SAVE_TIMEOUT_MS,
+    "La subida del archivo multimedia ha tardado demasiado.",
+  );
+  if (error) throw error;
+  const { data } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
+
 function validateImageFile(file) {
   const lowerName = String(file.name || "").toLowerCase();
   const hasKnownExtension = ACCEPTED_IMAGE_EXTENSIONS.some((extension) => lowerName.endsWith(extension));
   if (!ACCEPTED_IMAGE_TYPES.has(file.type) && !hasKnownExtension) {
     throw new Error("Formato de imagen no valido. Usa jpg, jpeg, png, webp o gif.");
   }
+}
+
+function validateMediaFile(file, kind) {
+  const lowerName = String(file.name || "").toLowerCase();
+  const types = kind === "audio" ? ACCEPTED_AUDIO_TYPES : ACCEPTED_VIDEO_TYPES;
+  const extensions = kind === "audio" ? ACCEPTED_AUDIO_EXTENSIONS : ACCEPTED_VIDEO_EXTENSIONS;
+  const limit = MEDIA_LIMITS[kind] || 25 * 1024 * 1024;
+  if (file.size > limit) {
+    throw new Error(`${kind === "audio" ? "El audio" : "El video"} debe pesar menos de ${Math.round(limit / 1024 / 1024)}MB.`);
+  }
+  if (!types.has(file.type) && !extensions.some((extension) => lowerName.endsWith(extension))) {
+    throw new Error(kind === "audio" ? "Formato de audio no valido. Usa mp3, wav, ogg o webm." : "Formato de video no valido. Usa mp4, webm u ogg.");
+  }
+}
+
+function mediaExtension(file, kind) {
+  const lowerName = String(file.name || "").toLowerCase();
+  const extensions = kind === "audio" ? ACCEPTED_AUDIO_EXTENSIONS : ACCEPTED_VIDEO_EXTENSIONS;
+  return extensions.find((extension) => lowerName.endsWith(extension)) || (kind === "audio" ? ".mp3" : ".mp4");
 }
 
 async function stylizeImageFile(file) {
@@ -7383,6 +7555,7 @@ function captureScrollState() {
     ".hunger-scroll",
     ".contracts-board",
     ".dice-log",
+    ".memory-scroll",
     ".roster-scroll",
     ".entity-scroll",
     ".inventory-container-list",
@@ -7400,6 +7573,7 @@ function captureScrollState() {
     windowY: window.scrollY,
     items: [...app.querySelectorAll(selectors)].map((node, index) => ({
       index,
+      key: scrollNodeKey(node, index),
       top: node.scrollTop,
       left: node.scrollLeft,
     })),
@@ -7421,6 +7595,7 @@ function restoreScrollState(snapshot) {
       ".hunger-scroll",
       ".contracts-board",
       ".dice-log",
+      ".memory-scroll",
       ".roster-scroll",
       ".entity-scroll",
       ".inventory-container-list",
@@ -7433,14 +7608,23 @@ function restoreScrollState(snapshot) {
       ".infiltration-log",
     ].join(",");
     const nodes = [...app.querySelectorAll(selectors)];
+    const keyedNodes = new Map(nodes.map((node, index) => [scrollNodeKey(node, index), node]));
     snapshot.items.forEach((item) => {
-      const node = nodes[item.index];
+      const node = keyedNodes.get(item.key) || nodes[item.index];
       if (!node) return;
       node.scrollTop = item.top;
       node.scrollLeft = item.left;
     });
     window.scrollTo(snapshot.windowX, snapshot.windowY);
   });
+}
+
+function scrollNodeKey(node, index) {
+  const explicit = node.getAttribute?.("data-scroll-key");
+  if (explicit) return explicit;
+  const panelTitle = node.closest?.(".panel")?.querySelector?.(".panel-header h3")?.textContent?.trim() || "";
+  const className = String(node.className || "").trim().replace(/\s+/g, ".");
+  return `${state.route}:${className}:${panelTitle || index}`;
 }
 
 function setFormSaving(form, value) {

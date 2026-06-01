@@ -1,3 +1,3 @@
 export const SUPABASE_URL = "https://guvjbzkbqdnmpjueivyq.supabase.co";
 export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd1dmpiemticWRubXBqdWVpdnlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAyNTg4NjgsImV4cCI6MjA5NTgzNDg2OH0.1H8Z0-CJo9cyhPxAqLco2VyB77dwB51JHaYluN7mFkU";
-export const SUPABASE_AUTH_REDIRECT_URL = "https://github.com/Aldepe/Archivo-Infernal";
+export const SUPABASE_AUTH_REDIRECT_URL = "https://aldepe.github.io/Archivo-Infernal/";
