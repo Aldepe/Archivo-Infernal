@@ -1,4 +1,4 @@
-import { SUPABASE_ANON_KEY, SUPABASE_URL } from "./config.js";
+import { SUPABASE_ANON_KEY, SUPABASE_AUTH_REDIRECT_URL, SUPABASE_URL } from "./config.js";
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.106.2/+esm";
 
 const app = document.querySelector("#app");
@@ -7,6 +7,7 @@ const supabase = hasSupabase ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : n
 
 const DEMO_DATA_KEY = "archivo-infernal-demo-data-v7";
 const DEMO_SESSION_KEY = "archivo-infernal-demo-session-v2";
+const PENDING_SIGNUP_KEY = "archivo-infernal-pending-signups-v1";
 const UI_STATE_KEY = "archivo-infernal-ui-state-v1";
 const CRAFTING_STATE_KEY = "archivo-infernal-crafting-v1";
 const IMAGE_BUCKET = "campaign-images";
@@ -23,6 +24,8 @@ const loreTypes = {
   zone: { label: "Zonas", singular: "Zona", icon: "map" },
   faction: { label: "Facciones", singular: "Faccion", icon: "shield" },
   character: { label: "Personajes", singular: "Personaje", icon: "user-round" },
+  history: { label: "Historias", singular: "Historia", icon: "scroll" },
+  event: { label: "Eventos", singular: "Evento", icon: "calendar-days" },
   other: { label: "Otros", singular: "Otro", icon: "package-open" },
 };
 
@@ -95,6 +98,7 @@ const statMeta = {
   hp_current: { label: "HP", icon: "heart-pulse", tone: "life" },
   hp_max: { label: "HP max", icon: "heart", tone: "life" },
   stress: { label: "Stress", icon: "flame", tone: "danger" },
+  stress_max: { label: "Stress max", icon: "flame-kindling", tone: "danger" },
   ac: { label: "AC", icon: "shield", tone: "guard" },
   passive_perception: { label: "PP", icon: "eye", tone: "sense" },
   passive_investigation: { label: "P. Inv", icon: "search", tone: "sense" },
@@ -109,6 +113,15 @@ const detailMeta = {
   status: { label: "Estado", icon: "activity" },
   race: { label: "Raza", icon: "sparkles" },
   age: { label: "Edad", icon: "hourglass" },
+  gender: { label: "Genero", icon: "user-round" },
+  size: { label: "Tamano", icon: "ruler" },
+  height: { label: "Altura", icon: "ruler" },
+  weight: { label: "Peso", icon: "scale" },
+  skin: { label: "Piel", icon: "palette" },
+  eyes: { label: "Ojos", icon: "eye" },
+  hair: { label: "Cabello", icon: "scissors" },
+  background: { label: "Background", icon: "scroll-text" },
+  alignment: { label: "Alignment", icon: "scale" },
   role: { label: "Rol", icon: "badge" },
   pronouns: { label: "Pronombres", icon: "message-circle" },
   faction: { label: "Faccion", icon: "shield" },
@@ -131,8 +144,20 @@ const detailMeta = {
   climate: { label: "Clima", icon: "cloud-sun" },
   appearance: { label: "Apariencia", icon: "eye" },
   personality: { label: "Personalidad", icon: "brain" },
+  ideals_moral: { label: "Ideales / moral", icon: "scale" },
+  bonds: { label: "Vinculos", icon: "link" },
+  weaknesses: { label: "Debilidades", icon: "badge-alert" },
+  fears: { label: "Miedos", icon: "ghost" },
+  insecurities: { label: "Inseguridades", icon: "shield-question" },
   motives: { label: "Motivaciones", icon: "goal" },
+  main_objective: { label: "Objetivo principal", icon: "target" },
+  personal_objectives: { label: "Objetivos personales", icon: "list-checks" },
+  moral_objectives: { label: "Objetivos espirituales", icon: "sparkles" },
+  hidden_objective: { label: "Objetivo oculto", icon: "eye-off" },
   alliances: { label: "Alianzas", icon: "handshake" },
+  allies: { label: "Aliados", icon: "users" },
+  factions_text: { label: "Facciones", icon: "shield" },
+  character_questions: { label: "Preguntas", icon: "circle-help" },
   resources: { label: "Recursos", icon: "gem" },
   buffs: { label: "Buffos", icon: "sparkles" },
   debuffs: { label: "Debuffos", icon: "badge-alert" },
@@ -169,6 +194,17 @@ const detailMeta = {
   attunement: { label: "Sintonizacion", icon: "badge-check" },
   mechanics: { label: "Reglas", icon: "dice-6" },
   history: { label: "Historia", icon: "book-open" },
+  summary_public: { label: "Resumen publico", icon: "scroll" },
+  full_story: { label: "Historia completa", icon: "book-open" },
+  causes: { label: "Causas", icon: "git-fork" },
+  consequences: { label: "Consecuencias", icon: "flame" },
+  important_people: { label: "Personajes importantes", icon: "users" },
+  participants: { label: "Participantes", icon: "users" },
+  trigger: { label: "Detonante", icon: "sparkles" },
+  events: { label: "Hechos", icon: "calendar-days" },
+  outcome: { label: "Resultado", icon: "flag" },
+  evidence: { label: "Pistas / pruebas", icon: "search" },
+  rumors: { label: "Rumores", icon: "message-circle" },
   hooks: { label: "Ganchos", icon: "link" },
 };
 
@@ -263,11 +299,48 @@ const loreDetailFields = {
     ["resources", "Usos / componentes", "textarea"],
     ["dm_notes", "Secretos DM", "textarea"],
   ],
+  history: [
+    ["status", "Estado", "input"],
+    ["age", "Epoca / periodo", "input"],
+    ["location", "Lugar principal", "input"],
+    ["faction", "Facciones implicadas", "input"],
+    ["summary_public", "Resumen para players", "textarea"],
+    ["full_story", "Historia completa", "textarea"],
+    ["causes", "Causas", "textarea"],
+    ["consequences", "Consecuencias", "textarea"],
+    ["important_people", "Personajes importantes", "textarea"],
+    ["secrets", "Verdad oculta", "textarea"],
+    ["hooks", "Ganchos de aventura", "textarea"],
+    ["dm_notes", "Secretos DM", "textarea"],
+  ],
+  event: [
+    ["status", "Estado", "input"],
+    ["age", "Fecha / momento", "input"],
+    ["location", "Lugar", "input"],
+    ["faction", "Facciones implicadas", "input"],
+    ["participants", "Participantes", "textarea"],
+    ["trigger", "Detonante", "textarea"],
+    ["events", "Que ocurrio", "textarea"],
+    ["outcome", "Resultado", "textarea"],
+    ["evidence", "Pistas / pruebas", "textarea"],
+    ["rumors", "Rumores", "textarea"],
+    ["secrets", "Verdad oculta", "textarea"],
+    ["dm_notes", "Secretos DM", "textarea"],
+  ],
 };
 
 const characterDetailKeys = [
   "race",
   "age",
+  "gender",
+  "size",
+  "height",
+  "weight",
+  "skin",
+  "eyes",
+  "hair",
+  "background",
+  "alignment",
   "role",
   "pronouns",
   "faction",
@@ -275,8 +348,21 @@ const characterDetailKeys = [
   "location",
   "appearance",
   "personality",
+  "ideals_moral",
+  "bonds",
+  "weaknesses",
+  "fears",
+  "insecurities",
   "motives",
+  "main_objective",
+  "personal_objectives",
+  "moral_objectives",
+  "hidden_objective",
   "alliances",
+  "allies",
+  "enemies",
+  "factions_text",
+  "character_questions",
   "resources",
   "buffs",
   "debuffs",
@@ -967,7 +1053,8 @@ async function init() {
       supabase.auth.onAuthStateChange(async (_event, session) => {
         state.session = session;
         if (session) {
-          await withTimeout(loadAll(), SAVE_TIMEOUT_MS, "No se pudieron cargar los datos de sesion a tiempo.");
+          const pendingSeed = await withTimeout(loadSessionDataWithPending(session), SAVE_TIMEOUT_MS, "No se pudieron cargar los datos de sesion a tiempo.");
+          if (pendingSeed.avatarUploadFailed) showToast("Sesion iniciada, pero no pude subir la foto pendiente. Guardala de nuevo desde la ficha.", "warning");
         } else {
           state.profile = null;
           state.data = emptyData();
@@ -982,11 +1069,11 @@ async function init() {
 
     if (state.session) {
       if (state.ui.route) state.route = state.ui.route;
-      await withTimeout(loadAll(), SAVE_TIMEOUT_MS, "No se pudieron cargar los datos iniciales a tiempo.");
+      await withTimeout(loadSessionDataWithPending(state.session), SAVE_TIMEOUT_MS, "No se pudieron cargar los datos iniciales a tiempo.");
     }
     render();
   } catch (error) {
-    showToast(error.message || "No se pudo iniciar la app.");
+    showToast(friendlyErrorMessage(error, "No se pudo iniciar la app."), "error");
     render();
   }
 }
@@ -1018,6 +1105,7 @@ function emptyData() {
 function render(options = {}) {
   const { preserveScroll = true } = options;
   const scrollState = preserveScroll ? captureScrollState() : null;
+  document.querySelectorAll("[data-floating-toast]").forEach((node) => node.remove());
   if (!state.session) {
     app.innerHTML = renderAuth();
   } else {
@@ -1845,7 +1933,7 @@ function renderStatsList(profiles, selectedUserId) {
               ${renderAvatar(profile, "tiny")}
               <span>
                 <h3>${escapeHtml(profile.character_name || profile.display_name)}</h3>
-                <p>${icon("heart-pulse")} HP ${Number(card.hp_current || 0)}/${Number(card.hp_max || 0)} - ${icon("flame")} Stress ${Number(card.stress || 0)}</p>
+                <p>${icon("heart-pulse")} HP ${Number(card.hp_current || 0)}/${Number(card.hp_max || 0)} - ${icon("flame")} Stress ${Number(card.stress || 0)}/${Number(card.stress_max ?? 10)}</p>
               </span>
             </button>
           `;
@@ -1887,18 +1975,33 @@ function renderPlayerStatSummary(card, profile) {
 function renderCharacterFacts(details = {}) {
   const entries = Object.entries(details).filter(([, value]) => Boolean(value));
   if (!entries.length) return "";
+  const visibleEntries = entries.filter(([key]) => !["memories", "secrets"].includes(key) || (key === "secrets" && isDM()));
+  const shortEntries = visibleEntries.filter(([, value]) => String(value).length <= 90 && !String(value).includes("\n"));
+  const longEntries = visibleEntries.filter(([, value]) => String(value).length > 90 || String(value).includes("\n"));
   return `
     <div class="detail-section">
       <h4>Rasgos</h4>
-      <div class="meta-grid">
-        ${entries
-          .filter(([key]) => !["memories", "secrets"].includes(key) || (key === "secrets" && isDM()))
+      ${
+        shortEntries.length
+          ? `<div class="meta-grid">
+        ${shortEntries
           .map(([key, value]) => {
             const meta = detailMeta[key] || { label: labelize(key), icon: "circle-dot" };
             return `<span class="fact-chip">${icon(meta.icon)} <strong>${escapeHtml(meta.label)}</strong> ${escapeHtml(value)}</span>`;
           })
-          .join("")}
-      </div>
+          .join("")}</div>`
+          : ""
+      }
+      ${
+        longEntries.length
+          ? `<div class="character-long-facts">${longEntries
+              .map(([key, value]) => {
+                const meta = detailMeta[key] || { label: labelize(key), icon: "circle-dot" };
+                return `<article class="detail-section compact-detail"><h4>${icon(meta.icon)} ${escapeHtml(meta.label)}</h4><p>${escapeHtml(value)}</p></article>`;
+              })
+              .join("")}</div>`
+          : ""
+      }
     </div>
   `;
 }
@@ -1987,6 +2090,50 @@ function renderMemoryAdmin(profile) {
   `;
 }
 
+function renderExtendedCharacterFields(details = {}) {
+  return `
+    <div class="grid-4">
+      <label class="field"><span>Genero</span><input name="gender" value="${escapeAttr(details.gender || "")}" /></label>
+      <label class="field"><span>Tamano</span><input name="size" value="${escapeAttr(details.size || "")}" placeholder="Small, Medium..." /></label>
+      <label class="field"><span>Altura</span><input name="height" value="${escapeAttr(details.height || "")}" /></label>
+      <label class="field"><span>Peso</span><input name="weight" value="${escapeAttr(details.weight || "")}" /></label>
+    </div>
+    <div class="grid-4">
+      <label class="field"><span>Piel</span><input name="skin" value="${escapeAttr(details.skin || "")}" /></label>
+      <label class="field"><span>Ojos</span><input name="eyes" value="${escapeAttr(details.eyes || "")}" /></label>
+      <label class="field"><span>Cabello</span><input name="hair" value="${escapeAttr(details.hair || "")}" /></label>
+      <label class="field"><span>Alignment</span><input name="alignment" value="${escapeAttr(details.alignment || "")}" /></label>
+    </div>
+    <div class="grid-3">
+      <label class="field"><span>Background</span><input name="background" value="${escapeAttr(details.background || "")}" /></label>
+      <label class="field"><span>Faccion base</span><input name="faction" value="${escapeAttr(details.faction || "")}" /></label>
+      <label class="field"><span>Religion</span><input name="religion" value="${escapeAttr(details.religion || "")}" /></label>
+    </div>
+    <div class="grid-2">
+      <label class="field"><span>Personalidad</span><textarea name="personality" placeholder="+ Rasgos, - defectos de trato...">${escapeHtml(details.personality || "")}</textarea></label>
+      <label class="field"><span>Ideales / moral</span><textarea name="ideals_moral">${escapeHtml(details.ideals_moral || "")}</textarea></label>
+    </div>
+    <div class="grid-2">
+      <label class="field"><span>Vinculos</span><textarea name="bonds">${escapeHtml(details.bonds || "")}</textarea></label>
+      <label class="field"><span>Debilidades / miedos</span><textarea name="weaknesses">${escapeHtml(details.weaknesses || details.fears || "")}</textarea></label>
+    </div>
+    <div class="grid-2">
+      <label class="field"><span>Objetivo principal</span><textarea name="main_objective">${escapeHtml(details.main_objective || "")}</textarea></label>
+      <label class="field"><span>Objetivos personales</span><textarea name="personal_objectives">${escapeHtml(details.personal_objectives || "")}</textarea></label>
+    </div>
+    <div class="grid-2">
+      <label class="field"><span>Objetivos morales / espirituales</span><textarea name="moral_objectives">${escapeHtml(details.moral_objectives || "")}</textarea></label>
+      <label class="field"><span>Objetivo oculto</span><textarea name="hidden_objective">${escapeHtml(details.hidden_objective || "")}</textarea></label>
+    </div>
+    <div class="grid-3">
+      <label class="field"><span>Aliados</span><textarea name="allies" placeholder="Nombre, afiliacion, personalidad, historia...">${escapeHtml(details.allies || "")}</textarea></label>
+      <label class="field"><span>Enemigos</span><textarea name="enemies">${escapeHtml(details.enemies || "")}</textarea></label>
+      <label class="field"><span>Facciones relacionadas</span><textarea name="factions_text">${escapeHtml(details.factions_text || "")}</textarea></label>
+    </div>
+    <label class="field"><span>Preguntas del personaje / fe / dilemas</span><textarea name="character_questions">${escapeHtml(details.character_questions || "")}</textarea></label>
+  `;
+}
+
 function renderProfileForm(profile) {
   const details = profile?.character_details || {};
   const selectedLore = profile?.character_lore_ids || [];
@@ -2019,11 +2166,8 @@ function renderProfileForm(profile) {
         <label class="field"><span>Clase / rol</span><input name="role" value="${escapeAttr(details.role || "")}" /></label>
         <label class="field"><span>Pronombres</span><input name="pronouns" value="${escapeAttr(details.pronouns || "")}" /></label>
       </div>
-      <div class="grid-3">
-        <label class="field"><span>Faccion</span><input name="faction" value="${escapeAttr(details.faction || "")}" /></label>
-        <label class="field"><span>Religion</span><input name="religion" value="${escapeAttr(details.religion || "")}" /></label>
-        <label class="field"><span>Zona</span><input name="location" value="${escapeAttr(details.location || "")}" /></label>
-      </div>
+      <label class="field"><span>Zona / localizacion actual</span><input name="location" value="${escapeAttr(details.location || "")}" /></label>
+      ${renderExtendedCharacterFields(details)}
       <label class="field">
         <span>Personalidad visible</span>
         <textarea name="character_description">${escapeHtml(profile?.character_description || "")}</textarea>
@@ -2086,16 +2230,10 @@ function renderDMProfileForm(profile) {
         <label class="field"><span>Clase / rol</span><input name="role" value="${escapeAttr(details.role || "")}" /></label>
         <label class="field"><span>Pronombres</span><input name="pronouns" value="${escapeAttr(details.pronouns || "")}" /></label>
       </div>
-      <div class="grid-3">
-        <label class="field"><span>Faccion</span><input name="faction" value="${escapeAttr(details.faction || "")}" /></label>
-        <label class="field"><span>Religion</span><input name="religion" value="${escapeAttr(details.religion || "")}" /></label>
-        <label class="field"><span>Zona</span><input name="location" value="${escapeAttr(details.location || "")}" /></label>
-      </div>
+      <label class="field"><span>Zona / localizacion actual</span><input name="location" value="${escapeAttr(details.location || "")}" /></label>
+      ${renderExtendedCharacterFields(details)}
       <label class="field"><span>Descripcion visible</span><textarea name="character_description">${escapeHtml(profile.character_description || "")}</textarea></label>
-      <div class="grid-2">
-        <label class="field"><span>Apariencia</span><textarea name="appearance">${escapeHtml(details.appearance || "")}</textarea></label>
-        <label class="field"><span>Personalidad</span><textarea name="personality">${escapeHtml(details.personality || "")}</textarea></label>
-      </div>
+      <label class="field"><span>Apariencia</span><textarea name="appearance">${escapeHtml(details.appearance || "")}</textarea></label>
       <div class="grid-2">
         <label class="field"><span>Motivaciones</span><textarea name="motives">${escapeHtml(details.motives || "")}</textarea></label>
         <label class="field"><span>Recursos / rasgos</span><textarea name="resources">${escapeHtml(details.resources || "")}</textarea></label>
@@ -2130,7 +2268,7 @@ function renderDMProfileForm(profile) {
 }
 
 function renderStatNumbers(card, extraClass = "") {
-  const keys = ["hp_current", "hp_max", "stress", "ac", "passive_perception", "passive_investigation", "passive_insight", "rations", "water", "inspiration", "exhaustion"];
+  const keys = ["hp_current", "hp_max", "stress", "stress_max", "ac", "passive_perception", "passive_investigation", "passive_insight", "rations", "water", "inspiration", "exhaustion"];
   return `
     <div class="stats-numbers ${escapeAttr(extraClass)}">
       ${keys
@@ -2171,6 +2309,7 @@ function renderStatsForm(card, profile) {
         <label class="field"><span>HP actual</span><input name="hp_current" type="number" value="${escapeAttr(card?.hp_current ?? 0)}" /></label>
         <label class="field"><span>HP max</span><input name="hp_max" type="number" value="${escapeAttr(card?.hp_max ?? 0)}" /></label>
         <label class="field"><span>Stress</span><input name="stress" type="number" value="${escapeAttr(card?.stress ?? 0)}" /></label>
+        <label class="field"><span>Stress max</span><input name="stress_max" type="number" min="1" value="${escapeAttr(card?.stress_max ?? 10)}" /></label>
         <label class="field"><span>Exhaustion</span><input name="exhaustion" type="number" value="${escapeAttr(card?.exhaustion ?? 0)}" /></label>
       </div>
       <div class="grid-3">
@@ -2674,7 +2813,7 @@ function renderInventory() {
   return `
     <section class="inventory-layout">
       <div class="panel inventory-matrix-panel">
-        <div class="panel-header"><h3>${icon("boxes")} Inventario</h3><span class="status-pill">${ownerItems.length} objetos</span></div>
+        <div class="panel-header"><h3>${icon("boxes")} Inventario de ${escapeHtml(profileName(ownerId))}</h3><span class="status-pill">${ownerItems.length} objetos</span></div>
         <div class="panel-body">
           ${renderInventoryMatrix(ownerItems, selectedItem, containers)}
         </div>
@@ -4119,7 +4258,7 @@ async function onClick(event) {
     }
   } catch (error) {
     console.error("Accion no completada:", error);
-    showToast(error.message || "Accion no completada.", "error");
+    showToast(friendlyErrorMessage(error, "Accion no completada."), "error");
     render();
   }
 }
@@ -4176,7 +4315,7 @@ async function onSubmit(event) {
     await withTimeout(handleFormSubmit(form, formData), SAVE_TIMEOUT_MS);
   } catch (error) {
     console.error(`Error guardando ${formLabel(form)}:`, error);
-    showToast(error.message || "Algo fallo al guardar.", "error");
+    showToast(friendlyErrorMessage(error, "Algo fallo al guardar."), "error");
   } finally {
     setFormSaving(form, false);
     setBusy(false);
@@ -4220,6 +4359,23 @@ async function handleFormSubmit(form, formData) {
     });
   }
   throw new Error("Formulario no reconocido.");
+}
+
+async function loadSessionDataWithPending(session) {
+  if (loadSessionDataWithPending.promise) return loadSessionDataWithPending.promise;
+  loadSessionDataWithPending.promise = (async () => {
+    const pendingSeed = hasSupabase ? await preparePendingSignupForSession(session) : {};
+    await loadAll(pendingSeed);
+    if (pendingSeed.pendingEmail) {
+      await finalizePendingSignupProfile(pendingSeed);
+      if (!pendingSeed.avatarUploadFailed) clearPendingSignup(pendingSeed.pendingEmail);
+      await loadAll();
+    }
+    return pendingSeed;
+  })().finally(() => {
+    loadSessionDataWithPending.promise = null;
+  });
+  return loadSessionDataWithPending.promise;
 }
 
 function onInput(event) {
@@ -4274,7 +4430,7 @@ async function onChange(event) {
     }
   } catch (error) {
     console.error("No se pudo aplicar el cambio:", error);
-    showToast(error.message || "No se pudo aplicar el cambio.", "error");
+    showToast(friendlyErrorMessage(error, "No se pudo aplicar el cambio."), "error");
     render();
   }
 }
@@ -4282,16 +4438,19 @@ async function onChange(event) {
 async function signIn(formData) {
   const email = String(formData.get("email") || "").trim();
   const password = String(formData.get("password") || "");
+  if (!email || !password) throw new Error("Escribe email y contrasena para entrar.");
+  let pendingSeed = {};
   if (hasSupabase) {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
     state.session = data.session;
+    pendingSeed = await loadSessionDataWithPending(data.session);
   } else {
     state.session = demoSignIn(email);
     localStorage.setItem(DEMO_SESSION_KEY, JSON.stringify(state.session));
+    await loadAll();
   }
-  await loadAll();
-  showToast("Sesion iniciada.");
+  showToast(pendingSeed?.avatarUploadFailed ? "Sesion iniciada, pero no pude subir la foto pendiente. Prueba a guardarla de nuevo desde la ficha." : "Sesion iniciada.", pendingSeed?.avatarUploadFailed ? "warning" : "success");
   render();
 }
 
@@ -4303,17 +4462,36 @@ async function signUp(formData) {
   const avatarFile = formData.get("avatar_file");
   let avatarUrl = String(formData.get("avatar_url") || "").trim();
   const characterTitle = String(formData.get("character_title") || "").trim();
+  if (!email || !password || !displayName || !characterName) throw new Error("Rellena email, contrasena, nombre visible y personaje.");
   if (!avatarUrl && !hasFile(avatarFile)) throw new Error("La foto del personaje es obligatoria.");
   if (!hasSupabase) avatarUrl = await resolveImageInput(formData, "avatar_file", avatarUrl, "avatars");
   if (hasSupabase) {
+    let pendingSignup = null;
+    if (hasFile(avatarFile)) {
+      const pendingAvatar = await preparePendingAvatarDataUrl(avatarFile);
+      pendingSignup = {
+        email,
+        displayName,
+        characterName,
+        characterTitle,
+        avatarDataUrl: pendingAvatar,
+        savedAt: new Date().toISOString(),
+      };
+    }
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { display_name: displayName, character_name: characterName, avatar_url: avatarUrl, character_title: characterTitle } },
+      options: {
+        emailRedirectTo: authRedirectUrl(),
+        data: { display_name: displayName, character_name: characterName, avatar_url: avatarUrl, character_title: characterTitle },
+      },
     });
     if (error) throw error;
     if (!data.session) {
-      showToast("Cuenta creada. Revisa el email si Supabase pide confirmacion.");
+      if (pendingSignup) savePendingSignup(pendingSignup);
+      state.authMode = "login";
+      showToast("Cuenta creada. Revisa tu correo, confirma la cuenta y vuelve aqui para iniciar sesion.", "warning");
+      render({ preserveScroll: true });
       return;
     }
     state.session = data.session;
@@ -4326,10 +4504,90 @@ async function signUp(formData) {
     avatarUrl = await uploadImage(avatarFile, "avatars");
     const { error } = await supabase.from("profiles").update({ avatar_url: avatarUrl }).eq("id", state.session.user.id);
     if (error) throw error;
+    clearPendingSignup(email);
     await loadAll();
   }
   showToast("Cuenta creada.");
   render();
+}
+
+function authRedirectUrl() {
+  const configured = String(SUPABASE_AUTH_REDIRECT_URL || "").trim();
+  if (configured) return configured;
+  return `${window.location.origin}${window.location.pathname}`;
+}
+
+async function preparePendingAvatarDataUrl(file) {
+  validateImageFile(file);
+  if (file.size > 5 * 1024 * 1024) throw new Error("La imagen debe pesar menos de 5MB.");
+  const processed = await stylizeImageFile(file);
+  return blobToDataUrl(processed);
+}
+
+function savePendingSignup(profile) {
+  const email = normalizeEmail(profile.email);
+  if (!email) return;
+  const pending = readJson(PENDING_SIGNUP_KEY) || {};
+  pending[email] = {
+    displayName: profile.displayName || "",
+    characterName: profile.characterName || "",
+    characterTitle: profile.characterTitle || "",
+    avatarDataUrl: profile.avatarDataUrl || "",
+    savedAt: profile.savedAt || new Date().toISOString(),
+  };
+  localStorage.setItem(PENDING_SIGNUP_KEY, JSON.stringify(pending));
+}
+
+function readPendingSignup(email) {
+  const pending = readJson(PENDING_SIGNUP_KEY) || {};
+  return pending[normalizeEmail(email)] || null;
+}
+
+function clearPendingSignup(email) {
+  const pending = readJson(PENDING_SIGNUP_KEY) || {};
+  delete pending[normalizeEmail(email)];
+  localStorage.setItem(PENDING_SIGNUP_KEY, JSON.stringify(pending));
+}
+
+async function preparePendingSignupForSession(session) {
+  const email = normalizeEmail(session?.user?.email);
+  const pending = readPendingSignup(email);
+  if (!email || !pending) return {};
+  const seed = {
+    displayName: pending.displayName || session.user.user_metadata?.display_name || "",
+    characterName: pending.characterName || session.user.user_metadata?.character_name || "",
+    characterTitle: pending.characterTitle || session.user.user_metadata?.character_title || "",
+    avatarUrl: "",
+    pendingEmail: email,
+    avatarUploadFailed: false,
+  };
+  if (pending.avatarDataUrl) {
+    try {
+      seed.avatarUrl = await uploadImage(dataUrlToFile(pending.avatarDataUrl, "personaje-pendiente.jpg"), "avatars");
+    } catch (error) {
+      console.warn("No se pudo subir la foto pendiente:", error);
+      seed.avatarUploadFailed = true;
+    }
+  }
+  return seed;
+}
+
+async function finalizePendingSignupProfile(seed = {}) {
+  if (!hasSupabase || !state.session?.user?.id || !seed.pendingEmail) return;
+  const payload = compact({
+    display_name: seed.displayName || undefined,
+    character_name: seed.characterName || undefined,
+    avatar_url: seed.avatarUrl || undefined,
+    character_title: seed.characterTitle || undefined,
+    updated_at: new Date().toISOString(),
+  });
+  if (Object.keys(payload).length <= 1) return;
+  const { error } = await supabase.from("profiles").update(payload).eq("id", state.session.user.id);
+  if (error) throw error;
+}
+
+function normalizeEmail(email) {
+  return String(email || "").trim().toLowerCase();
 }
 
 async function signOut() {
@@ -4635,6 +4893,7 @@ async function saveStats(formData) {
     hp_current: numberValue(formData.get("hp_current")),
     hp_max: numberValue(formData.get("hp_max")),
     stress: numberValue(formData.get("stress")),
+    stress_max: Math.max(1, numberValue(formData.get("stress_max")) || 10),
     ac: numberValue(formData.get("ac")),
     passive_perception: numberValue(formData.get("passive_perception")),
     passive_investigation: numberValue(formData.get("passive_investigation")),
@@ -4652,6 +4911,7 @@ async function saveStats(formData) {
   if (!payload.user_id) throw new Error("Selecciona un player.");
   const targetProfile = state.data.profiles.find((profile) => profile.id === payload.user_id);
   if (!targetProfile || targetProfile.role === "dm") throw new Error("El DM no tiene ficha de stats.");
+  payload.stress = Math.min(Number(payload.stress || 0), Number(payload.stress_max || 10));
 
   if (hasSupabase) {
     const { error } = await supabase.from("stat_cards").upsert(payload, { onConflict: "user_id" });
@@ -4678,6 +4938,8 @@ async function savePlayerStats(formData) {
     image_url: current.image_url || profile?.avatar_url || "",
     hp_current: numberValue(formData.get("hp_current")),
     hp_max: numberValue(formData.get("hp_max")),
+    stress: current.stress ?? 0,
+    stress_max: current.stress_max ?? 10,
     rations: numberValue(formData.get("rations")),
     water: numberValue(formData.get("water")),
     inspiration: numberValue(formData.get("inspiration")),
@@ -6296,12 +6558,13 @@ async function applyStressRollSupabase(userId) {
   const rolled = Math.floor(Math.random() * 4) + 1;
   const current = state.data.stats.find((card) => card.user_id === userId) || defaultStats(userId, state.data.profiles.find((profile) => profile.id === userId));
   const previousStress = Number(current.stress || 0);
-  const resultingStress = previousStress + rolled;
+  const resultingStress = Math.min(Number(current.stress_max || 10), previousStress + rolled);
   const payload = compact({
     ...current,
     id: current.id || undefined,
     user_id: userId,
     stress: resultingStress,
+    stress_max: Number(current.stress_max || 10),
     updated_by: state.session.user.id,
     updated_at: new Date().toISOString(),
   });
@@ -6358,6 +6621,7 @@ function defaultStats(userId, profile = {}) {
     hp_current: 10,
     hp_max: 10,
     stress: 0,
+    stress_max: 10,
     ac: 10,
     passive_perception: 10,
     passive_investigation: 10,
@@ -6680,6 +6944,17 @@ function fileToDataUrl(file) {
   });
 }
 
+function dataUrlToFile(dataUrl, filename) {
+  const [meta = "", payload = ""] = String(dataUrl || "").split(",");
+  const mime = meta.match(/^data:([^;]+);base64$/)?.[1] || "image/jpeg";
+  const binary = atob(payload);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new File([bytes], filename, { type: mime });
+}
+
 function hasFile(file) {
   return file instanceof File && file.size > 0;
 }
@@ -6807,7 +7082,8 @@ function demoRollStress(userId) {
     card = { ...defaultStats(userId, profile), id: uuid(), created_at: new Date().toISOString() };
     data.stats.push(card);
   }
-  card.stress = Number(card.stress || 0) + rolled;
+  card.stress_max = Number(card.stress_max || 10);
+  card.stress = Math.min(card.stress_max, Number(card.stress || 0) + rolled);
   card.updated_at = new Date().toISOString();
   data.rolls.push({
     id: uuid(),
@@ -6944,10 +7220,12 @@ async function reloadAndToast(message, type = "success") {
 }
 
 function showToast(message, type = "info") {
-  state.toast = { message: String(message || ""), type };
+  state.toast = { message: String(message || "Ha ocurrido algo, pero no recibimos detalle tecnico."), type };
+  paintFloatingToast();
   window.clearTimeout(showToast.timer);
   showToast.timer = window.setTimeout(() => {
     state.toast = "";
+    document.querySelectorAll("[data-floating-toast]").forEach((node) => node.remove());
     render();
   }, 3600);
 }
@@ -6955,7 +7233,44 @@ function showToast(message, type = "info") {
 function renderToast() {
   if (!state.toast) return "";
   const toast = typeof state.toast === "string" ? { message: state.toast, type: "info" } : state.toast;
-  return `<div class="toast toast-${escapeAttr(toast.type || "info")}" role="status">${escapeHtml(toast.message || "")}</div>`;
+  return `<div class="toast toast-${escapeAttr(toast.type || "info")}" role="status">${icon(toastIcon(toast.type))} ${escapeHtml(toast.message || "")}</div>`;
+}
+
+function paintFloatingToast() {
+  if (!state.toast || !document.body) return;
+  const toast = typeof state.toast === "string" ? { message: state.toast, type: "info" } : state.toast;
+  let node = document.querySelector("[data-floating-toast]");
+  if (!node) {
+    node = document.createElement("div");
+    node.setAttribute("data-floating-toast", "true");
+    node.setAttribute("role", "status");
+    document.body.appendChild(node);
+  }
+  node.className = `toast toast-${toast.type || "info"}`;
+  node.textContent = toast.message || "";
+}
+
+function toastIcon(type = "info") {
+  if (type === "success") return "check-circle-2";
+  if (type === "error") return "triangle-alert";
+  if (type === "warning") return "circle-alert";
+  return "info";
+}
+
+function friendlyErrorMessage(error, fallback = "No se pudo completar la accion.") {
+  const raw = String(error?.message || error?.error_description || error || "").trim();
+  if (!raw) return fallback;
+  const lower = raw.toLowerCase();
+  if (lower === "null" || lower === "undefined" || lower === "[object object]") return fallback;
+  if (lower.includes("invalid login credentials")) return "Email o contrasena incorrectos. Si acabas de crear la cuenta, confirma el correo antes de entrar.";
+  if (lower.includes("email not confirmed")) return "Te falta confirmar el correo antes de iniciar sesion.";
+  if (lower.includes("user already registered") || lower.includes("already registered")) return "Ese correo ya tiene cuenta. Usa iniciar sesion o recupera la contrasena.";
+  if (lower.includes("signup disabled")) return "El registro esta desactivado en Supabase.";
+  if (lower.includes("fetch") || lower.includes("network") || lower.includes("failed to fetch")) return "No hay conexion con el backend ahora mismo. Revisa internet/Supabase y prueba otra vez.";
+  if (lower.includes("row-level security") || lower.includes("permission denied") || lower.includes("42501")) return "Supabase ha bloqueado esta accion por permisos. Revisa que seas DM o que el schema este actualizado.";
+  if (lower.includes("jwt")) return "La sesion ha caducado. Cierra sesion y vuelve a entrar.";
+  if (lower.includes("timeout") || lower.includes("tardado demasiado")) return raw;
+  return raw;
 }
 
 function renderBanner(text) {
