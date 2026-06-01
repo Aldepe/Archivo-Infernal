@@ -19,13 +19,6 @@ const SAVE_TIMEOUT_MS = 45000;
 const ACCEPTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 const ACCEPTED_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif"];
 const IMAGE_ACCEPT_ATTR = "image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif";
-const ACCEPTED_AUDIO_TYPES = new Set(["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/ogg", "audio/webm"]);
-const ACCEPTED_AUDIO_EXTENSIONS = [".mp3", ".wav", ".ogg", ".oga", ".webm"];
-const AUDIO_ACCEPT_ATTR = "audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/ogg,audio/webm,.mp3,.wav,.ogg,.oga,.webm";
-const ACCEPTED_VIDEO_TYPES = new Set(["video/mp4", "video/webm", "video/ogg"]);
-const ACCEPTED_VIDEO_EXTENSIONS = [".mp4", ".webm", ".ogv", ".ogg"];
-const VIDEO_ACCEPT_ATTR = "video/mp4,video/webm,video/ogg,.mp4,.webm,.ogv,.ogg";
-const MEDIA_LIMITS = { audio: 50 * 1024 * 1024, video: 120 * 1024 * 1024 };
 
 const loreTypes = {
   all: { label: "Todo", icon: "library" },
@@ -1035,6 +1028,7 @@ const state = {
   selectedCombatantId: null,
   selectedInventoryItemId: null,
   contractFilterUserId: "all",
+  notesFilterUserId: "all",
   bazaarMood: "welcome",
   rollingUserId: null,
   dieFace: 1,
@@ -1049,7 +1043,8 @@ app.addEventListener("input", onInput);
 app.addEventListener("change", onChange);
 app.addEventListener("pointerdown", onPointerDown);
 app.addEventListener("pointerover", onPointerOver);
-app.addEventListener("play", onMediaPlay, true);
+window.addEventListener("pointerdown", unlockAmbientSound, { once: true });
+window.addEventListener("keydown", unlockAmbientSound, { once: true });
 window.addEventListener("pointerup", stopMapPainting);
 
 init();
@@ -1138,6 +1133,7 @@ function renderAuth() {
             <span class="role-pill">Campaña infernal</span>
             <h1>Archivo Infernal</h1>
           </div>
+          <button type="button" class="ghost auth-sound-toggle" data-action="toggle-sound">${icon(soundEnabled() ? "volume-2" : "volume-x")} Sonido</button>
           ${hasSupabase ? "" : renderBanner("Modo demo local activo. Al conectar Supabase, la app usara datos reales.")}
           <div class="auth-tabs" role="tablist">
             <button type="button" class="${state.authMode === "login" ? "active" : ""}" data-action="auth-tab" data-mode="login">
@@ -1270,7 +1266,7 @@ function renderTopbarActions() {
       <button type="button" class="primary" data-action="new-lore">${icon("plus")} Ficha</button>
     `;
   }
-  if (state.route === "notes") {
+  if (state.route === "notes" && !isDM()) {
     return `<button type="button" class="primary" data-action="new-note">${icon("plus")} Apunte</button>`;
   }
   if (state.route === "dm" && isDM()) {
@@ -1587,8 +1583,6 @@ function renderLoreDetail(item) {
         </div>
       </div>
       ${renderTextSection("Descripcion", item.description)}
-      ${renderLoreVideoPlayer(details.video_url)}
-      ${item.type === "zone" ? renderZoneMusicPlayer(details.music_url) : ""}
       ${renderDetailFacts(item)}
       ${children.length ? renderLoreChildren(children, item) : ""}
       ${linked.length ? renderRelations(linked, item.id) : ""}
@@ -1597,34 +1591,9 @@ function renderLoreDetail(item) {
   `;
 }
 
-function renderLoreVideoPlayer(videoUrl) {
-  if (!videoUrl) return "";
-  return `
-    <div class="detail-section media-panel">
-      <h4>${icon("video")} Video explicativo</h4>
-      <video class="lore-video" controls preload="metadata" src="${escapeAttr(videoUrl)}"></video>
-    </div>
-  `;
-}
-
-function renderZoneMusicPlayer(audioUrl) {
-  if (!audioUrl) {
-    return isDM()
-      ? `<div class="detail-section media-panel media-empty"><h4>${icon("music")} Musica de zona</h4><p>Sin musica asignada.</p></div>`
-      : "";
-  }
-  return `
-    <div class="detail-section media-panel">
-      <h4>${icon("music")} Musica de zona</h4>
-      <audio class="zone-audio" controls loop preload="metadata" src="${escapeAttr(audioUrl)}"></audio>
-      <span class="inline-label">${icon("volume-2")} Reproduccion manual, con loop disponible desde el reproductor.</span>
-    </div>
-  `;
-}
-
 function renderDetailFacts(item) {
   const details = item.details || {};
-  const skip = new Set(["dm_notes", "memories", "source_path", "image_refs", "imported_from", "raw_markdown_kept", "dm_source_markdown", "video_url", "music_url"]);
+  const skip = new Set(["dm_notes", "memories", "source_path", "image_refs", "imported_from", "raw_markdown_kept", "dm_source_markdown"]);
   const entries = Object.entries(details).filter(([, value]) => Boolean(value));
   if (!entries.length) return "";
   return `
@@ -1737,28 +1706,6 @@ function renderLoreForm() {
           <span>Cargar imagen</span>
           <input name="image_file" type="file" accept="${IMAGE_ACCEPT_ATTR}" />
         </label>
-        <input type="hidden" name="current_video_url" value="${escapeAttr(details.video_url || "")}" />
-        <div class="media-upload-box">
-          <label class="field">
-            <span>Video explicativo</span>
-            <input name="video_file" type="file" accept="${VIDEO_ACCEPT_ATTR}" />
-          </label>
-          ${details.video_url ? `<label class="check-row"><input name="remove_video" type="checkbox" /> Quitar video actual</label>` : `<span class="inline-label">${icon("video")} Sin video asignado.</span>`}
-        </div>
-        ${
-          item?.type === "zone"
-            ? `
-              <input type="hidden" name="current_music_url" value="${escapeAttr(details.music_url || "")}" />
-              <div class="media-upload-box">
-                <label class="field">
-                  <span>Musica de fondo de la zona</span>
-                  <input name="music_file" type="file" accept="${AUDIO_ACCEPT_ATTR}" />
-                </label>
-                ${details.music_url ? `<label class="check-row"><input name="remove_music" type="checkbox" /> Quitar musica actual</label>` : `<span class="inline-label">${icon("music")} Sin musica asignada.</span>`}
-              </div>
-            `
-            : ""
-        }
         <div class="grid-2">
           <label class="field">
             <span>Carpeta / zona padre</span>
@@ -1843,6 +1790,7 @@ function openLoreFolder(folderId) {
 
 function renderNotes() {
   const notes = [...state.data.notes].sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
+  if (isDM()) return renderDMNotes(notes);
   return `
     <section class="notes-layout">
       <aside class="panel">
@@ -1858,23 +1806,7 @@ function renderNotes() {
           <div class="notes-list">
             ${
               notes.length
-                ? notes
-                    .map(
-                      (note) => `
-                        <article class="note-card">
-                          <h3>${escapeHtml(note.title)}</h3>
-                          <p>${escapeHtml(note.body || "")}</p>
-                          <div class="detail-meta">
-                            ${(note.tags || []).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}
-                          </div>
-                          <div class="card-actions">
-                            <button type="button" class="icon-button" title="Editar" data-action="edit-note" data-id="${note.id}">${icon("pencil")}</button>
-                            <button type="button" class="icon-button danger" title="Borrar" data-action="delete-note" data-id="${note.id}">${icon("trash-2")}</button>
-                          </div>
-                        </article>
-                      `,
-                    )
-                    .join("")
+                ? renderNoteCards(notes, { canManage: true, showOwner: false })
                 : renderEmpty("No tienes apuntes personales.")
             }
           </div>
@@ -1882,6 +1814,83 @@ function renderNotes() {
       </div>
     </section>
   `;
+}
+
+function renderDMNotes(notes) {
+  const players = state.data.profiles.filter((profile) => profile.role !== "dm");
+  const selected = players.some((profile) => profile.id === state.notesFilterUserId) ? state.notesFilterUserId : "all";
+  state.notesFilterUserId = selected;
+  const visibleNotes = notes.filter((note) => selected === "all" || note.user_id === selected);
+  return `
+    <section class="notes-layout dm-notes-layout">
+      <aside class="panel">
+        <div class="panel-header">
+          <h3>${icon("notebook-tabs")} Apuntes de players</h3>
+          <span class="status-pill">${visibleNotes.length}</span>
+        </div>
+        <div class="panel-body">
+          <label class="field">
+            <span>${icon("filter")} Filtrar por personaje</span>
+            <select data-action="filter-notes">
+              <option value="all" ${selected === "all" ? "selected" : ""}>Todos</option>
+              ${players.map((profile) => `<option value="${profile.id}" ${selected === profile.id ? "selected" : ""}>${escapeHtml(profile.character_name || profile.display_name)}</option>`).join("")}
+            </select>
+          </label>
+          <div class="note-owner-list">
+            ${players
+              .map((profile) => {
+                const count = notes.filter((note) => note.user_id === profile.id).length;
+                return `<button type="button" class="stat-card ${selected === profile.id ? "active" : ""}" data-action="quick-filter-notes" data-id="${profile.id}">
+                  ${renderAvatar(profile, "tiny")}
+                  <span><h3>${escapeHtml(profile.character_name || profile.display_name)}</h3><p>${count} apuntes</p></span>
+                </button>`;
+              })
+              .join("")}
+          </div>
+        </div>
+      </aside>
+      <div class="panel">
+        <div class="panel-header">
+          <h3>${selected === "all" ? "Todos los apuntes" : `Apuntes de ${escapeHtml(profileName(selected))}`}</h3>
+          <span class="status-pill">${icon("eye")} Solo lectura DM</span>
+        </div>
+        <div class="panel-body">
+          <div class="notes-list">
+            ${visibleNotes.length ? renderNoteCards(visibleNotes, { canManage: false, showOwner: true }) : renderEmpty("No hay apuntes para ese filtro.")}
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderNoteCards(notes, options = {}) {
+  const { canManage = false, showOwner = false } = options;
+  return notes
+    .map(
+      (note) => `
+        <article class="note-card">
+          <div class="note-card-head">
+            <h3>${escapeHtml(note.title)}</h3>
+            ${showOwner ? `<span class="status-pill">${icon("user-round")} ${escapeHtml(profileName(note.user_id))}</span>` : ""}
+          </div>
+          <p>${escapeHtml(note.body || "")}</p>
+          <div class="detail-meta">
+            ${(note.tags || []).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}
+            ${note.updated_at ? `<span class="inline-label">${icon("clock")} ${escapeHtml(formatDateTime(note.updated_at))}</span>` : ""}
+          </div>
+          ${
+            canManage
+              ? `<div class="card-actions">
+                  <button type="button" class="icon-button" title="Editar" data-action="edit-note" data-id="${note.id}">${icon("pencil")}</button>
+                  <button type="button" class="icon-button danger" title="Borrar" data-action="delete-note" data-id="${note.id}">${icon("trash-2")}</button>
+                </div>`
+              : ""
+          }
+        </article>
+      `,
+    )
+    .join("");
 }
 
 function renderNoteForm() {
@@ -4152,6 +4161,10 @@ async function onClick(event) {
         case "delete-note":
           await deleteNote(id);
           break;
+        case "quick-filter-notes":
+          state.notesFilterUserId = id || "all";
+          render({ preserveScroll: true });
+          break;
         case "select-stats":
           state.selectedStatsUserId = id;
           render();
@@ -4538,6 +4551,11 @@ async function onChange(event) {
       render({ preserveScroll: true });
       return;
     }
+    if (action?.dataset.action === "filter-notes") {
+      state.notesFilterUserId = event.target.value || "all";
+      render({ preserveScroll: true });
+      return;
+    }
     if (action?.dataset.action === "select-active-map") {
       await setActiveBattleMap(event.target.value);
     }
@@ -4546,14 +4564,6 @@ async function onChange(event) {
     showToast(friendlyErrorMessage(error, "No se pudo aplicar el cambio."), "error");
     render();
   }
-}
-
-function onMediaPlay(event) {
-  const current = event.target;
-  if (!current?.matches?.("audio, video")) return;
-  app.querySelectorAll("audio, video").forEach((media) => {
-    if (media !== current && !media.paused) media.pause();
-  });
 }
 
 async function signIn(formData) {
@@ -4775,7 +4785,7 @@ async function loadAll(seedProfile = {}) {
   } else {
     state.data = normalizeDemoData(readJson(DEMO_DATA_KEY) || emptyData());
     state.profile = state.data.profiles.find((profile) => profile.id === state.session.user.id) || null;
-    state.data.notes = state.data.notes.filter((note) => note.user_id === state.session.user.id);
+    if (!isDM()) state.data.notes = state.data.notes.filter((note) => note.user_id === state.session.user.id);
   }
   if (!state.selectedLoreId && state.data.lore[0]) state.selectedLoreId = state.data.lore[0].id;
   const firstPlayerId = state.data.profiles.find((profile) => profile.role !== "dm")?.id || "";
@@ -4866,18 +4876,11 @@ async function saveLore(formData) {
   const id = String(formData.get("id") || "");
   const imageUrl = await resolveImageInput(formData, "image_file", String(formData.get("current_image_url") || "").trim(), "lore");
   const type = String(formData.get("type") || "character");
-  const videoUrl = await resolveMediaInput(formData, "video_file", String(formData.get("current_video_url") || "").trim(), "video", "videos", "remove_video");
-  const musicUrl =
-    type === "zone"
-      ? await resolveMediaInput(formData, "music_file", String(formData.get("current_music_url") || "").trim(), "audio", "zone-music", "remove_music")
-      : "";
   const details = {};
   (loreDetailFields[type] || loreDetailFields.other).forEach(([key]) => {
     const value = String(formData.get(key) || "").trim();
     if (value) details[key] = value;
   });
-  if (videoUrl) details.video_url = videoUrl;
-  if (type === "zone" && musicUrl) details.music_url = musicUrl;
   const payload = compact({
     id: id || undefined,
     type,
@@ -6985,16 +6988,15 @@ function profileName(userId) {
   return profile?.character_name || profile?.display_name || "Personaje";
 }
 
+function formatDateTime(value) {
+  const date = new Date(value || Date.now());
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" });
+}
+
 async function resolveImageInput(formData, fileField, currentUrl, folder) {
   const file = formData.get(fileField);
   if (hasFile(file)) return uploadImage(file, folder);
-  return currentUrl;
-}
-
-async function resolveMediaInput(formData, fileField, currentUrl, kind, folder, removeField = "") {
-  const file = formData.get(fileField);
-  if (hasFile(file)) return uploadMedia(file, folder, kind);
-  if (removeField && formData.has(removeField)) return "";
   return currentUrl;
 }
 
@@ -7020,52 +7022,12 @@ async function uploadImage(file, folder) {
   return data.publicUrl;
 }
 
-async function uploadMedia(file, folder, kind) {
-  if (!hasFile(file)) return "";
-  validateMediaFile(file, kind);
-  if (!hasSupabase) return blobToDataUrl(file);
-
-  const extension = mediaExtension(file, kind);
-  const path = `${folder}/${state.session.user.id}/${Date.now()}-${uuid()}${extension}`;
-  const { error } = await withTimeout(
-    supabase.storage.from(IMAGE_BUCKET).upload(path, file, {
-      cacheControl: "3600",
-      contentType: file.type || (kind === "audio" ? "audio/mpeg" : "video/mp4"),
-      upsert: true,
-    }),
-    SAVE_TIMEOUT_MS,
-    "La subida del archivo multimedia ha tardado demasiado.",
-  );
-  if (error) throw error;
-  const { data } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(path);
-  return data.publicUrl;
-}
-
 function validateImageFile(file) {
   const lowerName = String(file.name || "").toLowerCase();
   const hasKnownExtension = ACCEPTED_IMAGE_EXTENSIONS.some((extension) => lowerName.endsWith(extension));
   if (!ACCEPTED_IMAGE_TYPES.has(file.type) && !hasKnownExtension) {
     throw new Error("Formato de imagen no valido. Usa jpg, jpeg, png, webp o gif.");
   }
-}
-
-function validateMediaFile(file, kind) {
-  const lowerName = String(file.name || "").toLowerCase();
-  const types = kind === "audio" ? ACCEPTED_AUDIO_TYPES : ACCEPTED_VIDEO_TYPES;
-  const extensions = kind === "audio" ? ACCEPTED_AUDIO_EXTENSIONS : ACCEPTED_VIDEO_EXTENSIONS;
-  const limit = MEDIA_LIMITS[kind] || 25 * 1024 * 1024;
-  if (file.size > limit) {
-    throw new Error(`${kind === "audio" ? "El audio" : "El video"} debe pesar menos de ${Math.round(limit / 1024 / 1024)}MB.`);
-  }
-  if (!types.has(file.type) && !extensions.some((extension) => lowerName.endsWith(extension))) {
-    throw new Error(kind === "audio" ? "Formato de audio no valido. Usa mp3, wav, ogg o webm." : "Formato de video no valido. Usa mp4, webm u ogg.");
-  }
-}
-
-function mediaExtension(file, kind) {
-  const lowerName = String(file.name || "").toLowerCase();
-  const extensions = kind === "audio" ? ACCEPTED_AUDIO_EXTENSIONS : ACCEPTED_VIDEO_EXTENSIONS;
-  return extensions.find((extension) => lowerName.endsWith(extension)) || (kind === "audio" ? ".mp3" : ".mp4");
 }
 
 async function stylizeImageFile(file) {
@@ -7380,18 +7342,131 @@ function soundEnabled() {
 function toggleSound() {
   const next = !soundEnabled();
   saveUiState({ soundOn: next });
-  if (next) playSfx("toggle-sound");
+  if (next) {
+    startAmbientSound();
+    playSfx("toggle-sound");
+    showToast("Ambiente infernal activado.", "success");
+  } else {
+    stopAmbientSound();
+    showToast("Sonido desactivado.", "warning");
+  }
   render();
+}
+
+function unlockAmbientSound() {
+  if (soundEnabled()) startAmbientSound();
+}
+
+function audioContext() {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return null;
+  const ctx = playSfx.ctx || new AudioContext();
+  playSfx.ctx = ctx;
+  if (ctx.state === "suspended") ctx.resume();
+  return ctx;
+}
+
+function startAmbientSound() {
+  if (!soundEnabled() || startAmbientSound.nodes) return;
+  try {
+    const ctx = audioContext();
+    if (!ctx) return;
+    const master = ctx.createGain();
+    master.gain.setValueAtTime(0.0001, ctx.currentTime);
+    master.gain.exponentialRampToValueAtTime(0.018, ctx.currentTime + 1.4);
+    master.connect(ctx.destination);
+
+    const low = ctx.createOscillator();
+    const lowGain = ctx.createGain();
+    low.type = "sine";
+    low.frequency.setValueAtTime(48, ctx.currentTime);
+    low.frequency.setTargetAtTime(43, ctx.currentTime + 3, 8);
+    lowGain.gain.setValueAtTime(0.42, ctx.currentTime);
+    low.connect(lowGain);
+    lowGain.connect(master);
+    low.start();
+
+    const ember = ctx.createOscillator();
+    const emberGain = ctx.createGain();
+    const emberLfo = ctx.createOscillator();
+    const emberLfoGain = ctx.createGain();
+    ember.type = "triangle";
+    ember.frequency.setValueAtTime(91, ctx.currentTime);
+    emberGain.gain.setValueAtTime(0.12, ctx.currentTime);
+    emberLfo.type = "sine";
+    emberLfo.frequency.setValueAtTime(0.045, ctx.currentTime);
+    emberLfoGain.gain.setValueAtTime(17, ctx.currentTime);
+    emberLfo.connect(emberLfoGain);
+    emberLfoGain.connect(ember.frequency);
+    ember.connect(emberGain);
+    emberGain.connect(master);
+    ember.start();
+    emberLfo.start();
+
+    startAmbientSound.crackle = window.setInterval(() => playAmbientCrackle(ctx, master), 4500 + Math.random() * 3800);
+    startAmbientSound.nodes = { ctx, master, low, lowGain, ember, emberGain, emberLfo, emberLfoGain };
+  } catch {
+    // Browsers can block audio until interaction; clicks will retry through unlockAmbientSound.
+  }
+}
+
+function playAmbientCrackle(ctx, destination) {
+  if (!soundEnabled() || !destination) return;
+  try {
+    const duration = 0.08 + Math.random() * 0.08;
+    const buffer = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * duration)), ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let index = 0; index < data.length; index += 1) {
+      data[index] = (Math.random() * 2 - 1) * Math.pow(1 - index / data.length, 2.2);
+    }
+    const noise = ctx.createBufferSource();
+    const filter = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+    filter.type = "bandpass";
+    filter.frequency.setValueAtTime(900 + Math.random() * 1600, ctx.currentTime);
+    filter.Q.setValueAtTime(5, ctx.currentTime);
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.045, ctx.currentTime + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
+    noise.buffer = buffer;
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(destination);
+    noise.start();
+    noise.stop(ctx.currentTime + duration + 0.02);
+  } catch {
+    // Ambient crackles are optional.
+  }
+}
+
+function stopAmbientSound() {
+  const nodes = startAmbientSound.nodes;
+  if (startAmbientSound.crackle) {
+    window.clearInterval(startAmbientSound.crackle);
+    startAmbientSound.crackle = null;
+  }
+  if (!nodes) return;
+  try {
+    nodes.master.gain.exponentialRampToValueAtTime(0.0001, nodes.ctx.currentTime + 0.45);
+    window.setTimeout(() => {
+      [nodes.low, nodes.ember, nodes.emberLfo].forEach((node) => {
+        try {
+          node.stop();
+        } catch {}
+      });
+      try {
+        nodes.master.disconnect();
+      } catch {}
+    }, 520);
+  } catch {}
+  startAmbientSound.nodes = null;
 }
 
 function playSfx(kind = "click") {
   if (!soundEnabled()) return;
   try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
-    const ctx = playSfx.ctx || new AudioContext();
-    playSfx.ctx = ctx;
-    if (ctx.state === "suspended") ctx.resume();
+    const ctx = audioContext();
+    if (!ctx) return;
     const patterns = {
       "buy-shop-item": [196, 247, 330],
       deny: [132, 92],
