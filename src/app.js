@@ -10,6 +10,11 @@ const DEMO_SESSION_KEY = "archivo-infernal-demo-session-v2";
 const UI_STATE_KEY = "archivo-infernal-ui-state-v1";
 const CRAFTING_STATE_KEY = "archivo-infernal-crafting-v1";
 const IMAGE_BUCKET = "campaign-images";
+const DATA_POLL_MS = 12000;
+const SAVE_TIMEOUT_MS = 45000;
+const ACCEPTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const ACCEPTED_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif"];
+const IMAGE_ACCEPT_ATTR = "image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif";
 
 const loreTypes = {
   all: { label: "Todo", icon: "library" },
@@ -920,6 +925,11 @@ const state = {
   editingCraftResourceId: null,
   editingCraftRecipeId: null,
   editingCraftUpgradeId: null,
+  isPolling: false,
+  lastPollAt: 0,
+  paintingMap: false,
+  suppressNextMapClick: false,
+  lastPaintKey: "",
   selectedLoreId: null,
   selectedLoreFolderId: null,
   loreFormType: null,
@@ -940,16 +950,13 @@ app.addEventListener("click", onClick);
 app.addEventListener("submit", onSubmit);
 app.addEventListener("input", onInput);
 app.addEventListener("change", onChange);
+app.addEventListener("pointerdown", onPointerDown);
+app.addEventListener("pointerover", onPointerOver);
+window.addEventListener("pointerup", stopMapPainting);
 
 init();
 
-window.setInterval(async () => {
-  const activeTag = document.activeElement?.tagName;
-  if (!state.session || !hasSupabase || !["battlefield", "dice"].includes(state.route)) return;
-  if (["INPUT", "TEXTAREA", "SELECT"].includes(activeTag)) return;
-  await loadAll();
-  render();
-}, 6000);
+startAutoRefresh();
 
 async function init() {
   try {
@@ -960,7 +967,7 @@ async function init() {
       supabase.auth.onAuthStateChange(async (_event, session) => {
         state.session = session;
         if (session) {
-          await loadAll();
+          await withTimeout(loadAll(), SAVE_TIMEOUT_MS, "No se pudieron cargar los datos de sesion a tiempo.");
         } else {
           state.profile = null;
           state.data = emptyData();
@@ -975,7 +982,7 @@ async function init() {
 
     if (state.session) {
       if (state.ui.route) state.route = state.ui.route;
-      await loadAll();
+      await withTimeout(loadAll(), SAVE_TIMEOUT_MS, "No se pudieron cargar los datos iniciales a tiempo.");
     }
     render();
   } catch (error) {
@@ -1008,13 +1015,16 @@ function emptyData() {
   };
 }
 
-function render() {
+function render(options = {}) {
+  const { preserveScroll = true } = options;
+  const scrollState = preserveScroll ? captureScrollState() : null;
   if (!state.session) {
     app.innerHTML = renderAuth();
   } else {
     app.innerHTML = renderShell();
   }
   refreshIcons();
+  restoreScrollState(scrollState);
 }
 
 function renderAuth() {
@@ -1051,7 +1061,7 @@ function renderAuth() {
                   </label>
                   <label class="field">
                     <span>Cargar foto</span>
-                    <input name="avatar_file" type="file" accept="image/*" />
+                    <input name="avatar_file" type="file" accept="${IMAGE_ACCEPT_ATTR}" />
                   </label>
                   <label class="field">
                     <span>Frase / vibe</span>
@@ -1598,7 +1608,7 @@ function renderLoreForm() {
         <input type="hidden" name="current_image_url" value="${escapeAttr(item?.image_url || "")}" />
         <label class="field">
           <span>Cargar imagen</span>
-          <input name="image_file" type="file" accept="image/*" />
+          <input name="image_file" type="file" accept="${IMAGE_ACCEPT_ATTR}" />
         </label>
         <div class="grid-2">
           <label class="field">
@@ -1997,7 +2007,7 @@ function renderProfileForm(profile) {
       <input type="hidden" name="current_avatar_url" value="${escapeAttr(profile?.avatar_url || "")}" />
       <label class="field">
         <span>Cargar foto</span>
-        <input name="avatar_file" type="file" accept="image/*" />
+        <input name="avatar_file" type="file" accept="${IMAGE_ACCEPT_ATTR}" />
       </label>
       <label class="field">
         <span>Frase / vibe</span>
@@ -2067,7 +2077,7 @@ function renderDMProfileForm(profile) {
       <div class="grid-3">
         <label class="field"><span>Nombre visible</span><input name="display_name" value="${escapeAttr(profile.display_name || "")}" required /></label>
         <label class="field"><span>Personaje</span><input name="character_name" value="${escapeAttr(profile.character_name || "")}" required /></label>
-        <label class="field"><span>Cargar foto</span><input name="avatar_file" type="file" accept="image/*" /></label>
+        <label class="field"><span>Cargar foto</span><input name="avatar_file" type="file" accept="${IMAGE_ACCEPT_ATTR}" /></label>
       </div>
       <label class="field"><span>Frase / vibe</span><input name="character_title" value="${escapeAttr(profile.character_title || "")}" placeholder="Devota rota, cazador de pactos..." /></label>
       <div class="grid-4">
@@ -2154,7 +2164,7 @@ function renderStatsForm(card, profile) {
       <input type="hidden" name="current_image_url" value="${escapeAttr(card?.image_url || "")}" />
       <div class="grid-3">
         <label class="field"><span>Personaje</span><input name="character_name" value="${escapeAttr(card?.character_name || profile?.character_name || "")}" /></label>
-        <label class="field"><span>Foto ficha</span><input name="image_file" type="file" accept="image/*" /></label>
+        <label class="field"><span>Foto ficha</span><input name="image_file" type="file" accept="${IMAGE_ACCEPT_ATTR}" /></label>
         <label class="field"><span>AC</span><input name="ac" type="number" value="${escapeAttr(card?.ac ?? 10)}" /></label>
       </div>
       <div class="grid-4">
@@ -2222,6 +2232,9 @@ function renderBattlefield() {
           <h3>Campo tactico</h3>
           <div class="timeline-controls">
             <span class="status-pill">${icon(currentMap.hidden ? "eye-off" : "eye")} ${currentMap.hidden ? "Oculto a players" : "Visible"}</span>
+            <button type="button" class="icon-button ghost" title="Alejar mapa" data-action="zoom-map" data-delta="-0.1">${icon("zoom-out")}</button>
+            <span class="status-pill">${Math.round(battleMapZoom() * 100)}%</span>
+            <button type="button" class="icon-button ghost" title="Acercar mapa" data-action="zoom-map" data-delta="0.1">${icon("zoom-in")}</button>
             ${isDM() ? `<button type="button" class="ghost" data-action="toggle-map-hidden">${icon(currentMap.hidden ? "eye" : "eye-off")} ${currentMap.hidden ? "Mostrar" : "Ocultar"}</button>` : ""}
           </div>
         </div>
@@ -2338,7 +2351,7 @@ function renderBattleMap(combatants, activeId, battleState, currentMap) {
   const bg = currentMap.background_url ? `background-image: linear-gradient(rgba(10,9,8,.32), rgba(10,9,8,.58)), url('${escapeAttr(currentMap.background_url)}');` : "";
   return `
     <div class="battle-map-scroll">
-      <div class="battle-map" aria-label="Campo de batalla en cuadricula" style="--map-w:${width};--map-h:${height};${bg}">
+      <div class="battle-map" aria-label="Campo de batalla en cuadricula" style="--map-w:${width};--map-h:${height};--map-zoom:${battleMapZoom()};${bg}">
         ${cells.join("")}
       </div>
     </div>
@@ -2384,7 +2397,7 @@ function renderMapManager(battleState, currentMap) {
         <label class="field"><span>Alto</span><input name="map_height" type="number" min="4" max="90" value="${escapeAttr(currentMap.height)}" /></label>
       </div>
       <input type="hidden" name="current_background_url" value="${escapeAttr(currentMap.background_url || "")}" />
-      <label class="field"><span>Imagen de fondo</span><input name="background_file" type="file" accept="image/*" /></label>
+      <label class="field"><span>Imagen de fondo</span><input name="background_file" type="file" accept="${IMAGE_ACCEPT_ATTR}" /></label>
       <div class="form-actions">
         <button class="primary" type="submit">${icon("save")} Guardar mapa</button>
         <button type="button" class="ghost" data-action="new-map">${icon("map-plus")} Nuevo mapa</button>
@@ -2542,7 +2555,7 @@ function renderMonsterForm(currentMap) {
       <label class="field"><span>Tipo</span><select name="type"><option value="monster" ${selectedOption("type", "monster", "monster")}>Monstruo</option><option value="npc" ${selectedOption("type", "npc", "monster")}>NPC</option><option value="object" ${selectedOption("type", "object", "monster")}>Objeto</option><option value="trap" ${selectedOption("type", "trap", "monster")}>Trampa</option></select></label>
       <label class="field"><span>Importar statblock</span><textarea name="monster_block" placeholder="Pega aqui un statblock: nombre, AC/Armor Class, HP/Hit Points, notas..."></textarea></label>
       <label class="field"><span>Nombre</span><input name="name" placeholder="Diablo barbado, cultista..." /></label>
-      <label class="field"><span>Foto</span><input name="avatar_file" type="file" accept="image/*" /></label>
+      <label class="field"><span>Foto</span><input name="avatar_file" type="file" accept="${IMAGE_ACCEPT_ATTR}" /></label>
       <label class="check-inline"><input name="visible_to_players" type="checkbox" ${checkedOption("visible_to_players", true)} /> Visible para players</label>
       <div class="grid-3">
         <label class="field"><span>Iniciativa</span><input name="initiative" type="number" value="10" /></label>
@@ -2567,7 +2580,7 @@ function renderCombatantControlForm(combatant) {
       <h3>${escapeHtml(combatant.name)}</h3>
       <input type="hidden" name="id" value="${escapeAttr(combatant.id)}" />
       <input type="hidden" name="current_avatar_url" value="${escapeAttr(combatant.avatar_url || "")}" />
-      <label class="field"><span>Foto</span><input name="avatar_file" type="file" accept="image/*" /></label>
+      <label class="field"><span>Foto</span><input name="avatar_file" type="file" accept="${IMAGE_ACCEPT_ATTR}" /></label>
       <label class="check-inline"><input name="visible_to_players" type="checkbox" ${combatant.visible_to_players === false ? "" : "checked"} /> Visible para players</label>
       <div class="grid-3">
         <label class="field"><span>Iniciativa</span><input name="initiative" type="number" value="${escapeAttr(combatant.initiative ?? "")}" /></label>
@@ -2647,6 +2660,10 @@ function renderDiceRoll(roll) {
 
 function renderInventory() {
   const ownerId = isDM() ? state.selectedStatsUserId || state.data.profiles.find((profile) => profile.role !== "dm")?.id || "" : state.session.user.id;
+  const ownerProfile = state.data.profiles.find((profile) => profile.id === ownerId);
+  if (isDM() && (!ownerId || !ownerProfile || ownerProfile.role === "dm")) {
+    return `<section class="panel"><div class="panel-header"><h3>${icon("backpack")} Inventario de players</h3></div><div class="panel-body">${renderEmpty("Crea o selecciona un player. El DM no tiene inventario propio.")}</div></section>`;
+  }
   const items = state.data.inventory.filter((item) => isDM() || item.user_id === state.session.user.id);
   const ownerItems = items.filter((item) => item.user_id === ownerId || !isDM());
   const ownerStats = state.data.stats.find((card) => card.user_id === ownerId) || defaultStats(ownerId, state.data.profiles.find((p) => p.id === ownerId));
@@ -2736,7 +2753,7 @@ function renderInventoryForm(ownerId, containers = inventoryContainersFor(ownerI
       <input type="hidden" name="user_id" value="${escapeAttr(ownerId)}" />
       <input type="hidden" name="current_image_url" value="${escapeAttr(editing?.image_url || "")}" />
       <label class="field"><span>Nombre</span><input name="name" value="${escapeAttr(editing?.name || "")}" required /></label>
-      <label class="field"><span>Imagen</span><input name="image_file" type="file" accept="image/*" /></label>
+      <label class="field"><span>Imagen</span><input name="image_file" type="file" accept="${IMAGE_ACCEPT_ATTR}" /></label>
       <div class="grid-2">
         <label class="field"><span>Rareza</span><select name="rarity">${Object.entries(rarityMeta).map(([key, meta]) => `<option value="${key}" ${String(selectedRarity) === key ? "selected" : ""}>${meta.label}</option>`).join("")}</select></label>
         <label class="field"><span>Cantidad</span><input name="quantity" type="number" value="${escapeAttr(editing?.quantity || 1)}" min="1" /></label>
@@ -3790,7 +3807,7 @@ async function onClick(event) {
       state.route = routeButton.dataset.route;
       if (state.route === "dm" && !isDM()) state.route = "timeline";
       saveUiState({ route: state.route });
-      render();
+      render({ preserveScroll: false });
       requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
       return;
     }
@@ -3947,7 +3964,14 @@ async function onClick(event) {
           await toggleMapHidden();
           break;
         case "paint-map-cell":
+          if (state.suppressNextMapClick) {
+            state.suppressNextMapClick = false;
+            break;
+          }
           await paintMapCell(Number(action.dataset.x), Number(action.dataset.y));
+          break;
+        case "zoom-map":
+          setBattleMapZoom(Number(action.dataset.delta || 0));
           break;
         case "clear-map":
           await clearMap();
@@ -4100,6 +4124,42 @@ async function onClick(event) {
   }
 }
 
+function onPointerDown(event) {
+  const cell = event.target.closest?.(".map-cell-clickable[data-action='paint-map-cell']");
+  if (!cell || currentMapTool() !== "terrain") return;
+  event.preventDefault();
+  state.paintingMap = true;
+  state.suppressNextMapClick = true;
+  state.lastPaintKey = "";
+  queueMapPaint(Number(cell.dataset.x), Number(cell.dataset.y), { preserveScroll: true });
+}
+
+function onPointerOver(event) {
+  if (!state.paintingMap || currentMapTool() !== "terrain") return;
+  const cell = event.target.closest?.(".map-cell-clickable[data-action='paint-map-cell']");
+  if (!cell) return;
+  const key = `${cell.dataset.x}:${cell.dataset.y}:${currentTerrainTool()}`;
+  if (key === state.lastPaintKey) return;
+  state.lastPaintKey = key;
+  queueMapPaint(Number(cell.dataset.x), Number(cell.dataset.y), { preserveScroll: true, quiet: true });
+}
+
+function stopMapPainting() {
+  state.paintingMap = false;
+  state.lastPaintKey = "";
+}
+
+function queueMapPaint(x, y, options = {}) {
+  queueMapPaint.promise = (queueMapPaint.promise || Promise.resolve())
+    .catch(() => {})
+    .then(() => paintMapCell(x, y, options))
+    .catch((error) => {
+      console.error("No se pudo pintar el mapa:", error);
+      showToast(error.message || "No se pudo pintar el mapa.", "error");
+      render({ preserveScroll: true });
+    });
+}
+
 async function onSubmit(event) {
   const form = event.target.closest("form[data-form]");
   if (!form) return;
@@ -4113,41 +4173,7 @@ async function onSubmit(event) {
     setBusy(true);
     setFormSaving(form, true);
     playSfx(form.dataset.form);
-    if (form.dataset.form === "login") await signIn(formData);
-    if (form.dataset.form === "signup") await signUp(formData);
-    if (form.dataset.form === "event") await saveEvent(formData);
-    if (form.dataset.form === "lore") await saveLore(formData);
-    if (form.dataset.form === "note") await saveNote(formData);
-    if (form.dataset.form === "stats") await saveStats(formData);
-    if (form.dataset.form === "player-stats") await savePlayerStats(formData);
-    if (form.dataset.form === "profile") await saveProfile(formData);
-    if (form.dataset.form === "dm-profile") await saveDMProfile(formData);
-    if (form.dataset.form === "inventory") await saveInventoryItem(formData);
-    if (form.dataset.form === "inventory-container") await saveInventoryContainer(formData);
-    if (form.dataset.form === "soul-coins") await saveSoulCoins(formData);
-    if (form.dataset.form === "contract") await saveContract(formData);
-    if (form.dataset.form === "shop-pool-item") await saveShopPoolItem(formData);
-    if (form.dataset.form === "craft-resource") await saveCraftingResource(formData);
-    if (form.dataset.form === "craft-recipe") await saveCraftingRecipe(formData);
-    if (form.dataset.form === "craft-upgrade") await saveCraftingUpgrade(formData);
-    if (form.dataset.form === "infiltration-config") await saveInfiltrationConfig(formData);
-    if (form.dataset.form === "infiltration-clue") await saveInfiltrationClue(formData);
-    if (form.dataset.form === "infiltration-resources") await saveInfiltrationResources(formData);
-    if (form.dataset.form === "infiltration-action") await saveInfiltrationAction(formData);
-    if (form.dataset.form === "infiltration-decision") await resolveInfiltrationDecision(formData);
-    if (form.dataset.form === "initiative") await saveInitiative(formData);
-    if (form.dataset.form === "monster") await saveMonster(formData);
-    if (form.dataset.form === "combatant") await saveCombatant(formData);
-    if (form.dataset.form === "map-settings") await saveMapSettings(formData);
-    if (form.dataset.form === "map-editor") await saveMapArea(formData);
-    if (form.dataset.form === "dice") {
-      await saveDiceRoll({
-        quantity: numberValue(formData.get("quantity")) || 1,
-        sides: numberValue(formData.get("sides")) || 20,
-        modifier: numberValue(formData.get("modifier")),
-        label: String(formData.get("label") || "").trim(),
-      });
-    }
+    await withTimeout(handleFormSubmit(form, formData), SAVE_TIMEOUT_MS);
   } catch (error) {
     console.error(`Error guardando ${formLabel(form)}:`, error);
     showToast(error.message || "Algo fallo al guardar.", "error");
@@ -4155,6 +4181,45 @@ async function onSubmit(event) {
     setFormSaving(form, false);
     setBusy(false);
   }
+}
+
+async function handleFormSubmit(form, formData) {
+  if (form.dataset.form === "login") return signIn(formData);
+  if (form.dataset.form === "signup") return signUp(formData);
+  if (form.dataset.form === "event") return saveEvent(formData);
+  if (form.dataset.form === "lore") return saveLore(formData);
+  if (form.dataset.form === "note") return saveNote(formData);
+  if (form.dataset.form === "stats") return saveStats(formData);
+  if (form.dataset.form === "player-stats") return savePlayerStats(formData);
+  if (form.dataset.form === "profile") return saveProfile(formData);
+  if (form.dataset.form === "dm-profile") return saveDMProfile(formData);
+  if (form.dataset.form === "inventory") return saveInventoryItem(formData);
+  if (form.dataset.form === "inventory-container") return saveInventoryContainer(formData);
+  if (form.dataset.form === "soul-coins") return saveSoulCoins(formData);
+  if (form.dataset.form === "contract") return saveContract(formData);
+  if (form.dataset.form === "shop-pool-item") return saveShopPoolItem(formData);
+  if (form.dataset.form === "craft-resource") return saveCraftingResource(formData);
+  if (form.dataset.form === "craft-recipe") return saveCraftingRecipe(formData);
+  if (form.dataset.form === "craft-upgrade") return saveCraftingUpgrade(formData);
+  if (form.dataset.form === "infiltration-config") return saveInfiltrationConfig(formData);
+  if (form.dataset.form === "infiltration-clue") return saveInfiltrationClue(formData);
+  if (form.dataset.form === "infiltration-resources") return saveInfiltrationResources(formData);
+  if (form.dataset.form === "infiltration-action") return saveInfiltrationAction(formData);
+  if (form.dataset.form === "infiltration-decision") return resolveInfiltrationDecision(formData);
+  if (form.dataset.form === "initiative") return saveInitiative(formData);
+  if (form.dataset.form === "monster") return saveMonster(formData);
+  if (form.dataset.form === "combatant") return saveCombatant(formData);
+  if (form.dataset.form === "map-settings") return saveMapSettings(formData);
+  if (form.dataset.form === "map-editor") return saveMapArea(formData);
+  if (form.dataset.form === "dice") {
+    return saveDiceRoll({
+      quantity: numberValue(formData.get("quantity")) || 1,
+      sides: numberValue(formData.get("sides")) || 20,
+      modifier: numberValue(formData.get("modifier")),
+      label: String(formData.get("label") || "").trim(),
+    });
+  }
+  throw new Error("Formulario no reconocido.");
 }
 
 function onInput(event) {
@@ -4443,6 +4508,7 @@ async function saveLore(formData) {
   const relatedIds = formData.getAll("related_ids").map(String);
   const visibleUserIds = formData.getAll("visible_user_ids").map(String);
   const relationLabel = String(formData.get("relation_label") || "Relacionado con").trim();
+  if (!payload.title) throw new Error("La ficha de lore necesita nombre.");
 
   let savedId = id;
   if (hasSupabase) {
@@ -4756,6 +4822,8 @@ async function toggleMemory(profileId, memoryId) {
 async function saveInventoryItem(formData) {
   const userId = isDM() ? String(formData.get("user_id") || state.session.user.id) : state.session.user.id;
   if (!userId) throw new Error("Selecciona un personaje para guardar el objeto.");
+  const targetProfile = state.data.profiles.find((profile) => profile.id === userId);
+  if (!targetProfile || targetProfile.role === "dm") throw new Error("El DM no tiene inventario propio. Selecciona un player.");
   const id = String(formData.get("id") || "");
   const existing = id ? state.data.inventory.find((item) => item.id === id) : null;
   if (id && !existing) throw new Error("No encuentro ese objeto para editar.");
@@ -4800,6 +4868,8 @@ async function saveInventoryItem(formData) {
 async function saveInventoryContainer(formData) {
   const userId = isDM() ? String(formData.get("user_id") || "") : state.session.user.id;
   if (!userId) throw new Error("Selecciona un personaje para el contenedor.");
+  const targetProfile = state.data.profiles.find((profile) => profile.id === userId);
+  if (!targetProfile || targetProfile.role === "dm") throw new Error("El DM no tiene almacenaje propio. Selecciona un player.");
   const id = String(formData.get("id") || "");
   const payload = compact({
     id: id || undefined,
@@ -5170,10 +5240,10 @@ async function setActiveBattleMap(mapId) {
   render();
 }
 
-async function paintMapCell(x, y) {
+async function paintMapCell(x, y, options = {}) {
   const battleState = getBattleState();
   const map = activeBattleMap(battleState);
-  const mapTool = document.querySelector('select[name="map_tool"]')?.value || "move";
+  const mapTool = currentMapTool();
   if (!isDM() && map.hidden) throw new Error("El mapa esta oculto mientras el DM lo prepara.");
   if (!isDM() && !["move", "area"].includes(mapTool)) throw new Error("Solo puedes mover tu ficha o poner areas.");
   if (mapTool === "move") {
@@ -5188,17 +5258,19 @@ async function paintMapCell(x, y) {
     const area = { ...draftedArea, visible: isDM() ? draftedArea.visible : true, created_by: state.session.user.id };
     await saveBattleState(withUpdatedActiveMap(battleState, { ...map, areas: [...(map.areas || []), area] }));
     await loadAll();
-    render();
+    render({ preserveScroll: options.preserveScroll !== false });
+    if (!options.quiet) showToast("Area colocada en el mapa.");
     return;
   }
   ensureDM();
-  const terrainTool = document.querySelector('select[name="terrain_tool"]')?.value || "wall";
+  const terrainTool = currentTerrainTool();
   const terrainVisible = document.querySelector('input[name="terrain_visible"]')?.checked ?? true;
   const terrain = [...(map.terrain || [])].filter((cell) => !(Number(cell.x) === x && Number(cell.y) === y));
   if (terrainTool !== "clear") terrain.push({ id: uuid(), x, y, type: terrainTool, visible: terrainVisible });
   await saveBattleState(withUpdatedActiveMap(battleState, { ...map, terrain }));
   await loadAll();
-  render();
+  render({ preserveScroll: options.preserveScroll !== false });
+  if (!options.quiet) showToast(terrainTool === "clear" ? "Celda limpiada." : "Terreno pintado.");
 }
 
 async function moveCombatantTo(id, x, y, mapId) {
@@ -5217,7 +5289,25 @@ async function moveCombatantTo(id, x, y, mapId) {
     saveDemo(data);
   }
   await loadAll();
-  render();
+  render({ preserveScroll: true });
+}
+
+function currentMapTool() {
+  return document.querySelector('select[name="map_tool"]')?.value || remembered("map_tool", "move") || "move";
+}
+
+function currentTerrainTool() {
+  return document.querySelector('select[name="terrain_tool"]')?.value || remembered("terrain_tool", "wall") || "wall";
+}
+
+function battleMapZoom() {
+  return clamp(Number(state.ui?.battleMapZoom || 1), 0.5, 2.5);
+}
+
+function setBattleMapZoom(delta) {
+  const next = clamp(Math.round((battleMapZoom() + delta) * 10) / 10, 0.5, 2.5);
+  saveUiState({ battleMapZoom: next });
+  render({ preserveScroll: true });
 }
 
 async function clearMap() {
@@ -6177,21 +6267,56 @@ async function rollStress(userId) {
   state.dieFace = "?";
   render();
   const stopAnimation = animateDie();
-  await wait(950);
-  let result;
-  if (hasSupabase) {
-    const response = await supabase.rpc("apply_stress_roll", { target_user: userId, die_size: 4 });
-    if (response.error) throw response.error;
-    result = Array.isArray(response.data) ? response.data[0] : response.data;
-  } else {
-    result = demoRollStress(userId);
+  try {
+    await wait(950);
+    let result;
+    if (hasSupabase) {
+      result = await applyStressRollSupabase(userId);
+    } else {
+      result = demoRollStress(userId);
+    }
+    stopAnimation(result?.rolled || 1);
+    state.dieFace = result?.rolled || 1;
+    await loadAll();
+    showToast(`Stress +${result?.rolled || 1}. Total: ${result?.resulting_stress ?? "?"}.`, "success");
+  } catch (error) {
+    stopAnimation(1);
+    console.error("No se pudo tirar stress:", error);
+    showToast(error.message || "No se pudo tirar stress.", "error");
+  } finally {
+    state.rollingUserId = null;
+    render({ preserveScroll: true });
   }
-  stopAnimation(result?.rolled || 1);
-  state.rollingUserId = null;
-  state.dieFace = result?.rolled || 1;
-  await loadAll();
-  showToast(`Stress +${result?.rolled || 1}. Total: ${result?.resulting_stress ?? "?"}.`);
-  render();
+}
+
+async function applyStressRollSupabase(userId) {
+  const response = await supabase.rpc("apply_stress_roll", { target_user: userId, die_size: 4 });
+  if (!response.error) return Array.isArray(response.data) ? response.data[0] : response.data;
+  console.warn("RPC apply_stress_roll fallo; usando actualizacion directa.", response.error);
+  const rolled = Math.floor(Math.random() * 4) + 1;
+  const current = state.data.stats.find((card) => card.user_id === userId) || defaultStats(userId, state.data.profiles.find((profile) => profile.id === userId));
+  const previousStress = Number(current.stress || 0);
+  const resultingStress = previousStress + rolled;
+  const payload = compact({
+    ...current,
+    id: current.id || undefined,
+    user_id: userId,
+    stress: resultingStress,
+    updated_by: state.session.user.id,
+    updated_at: new Date().toISOString(),
+  });
+  const statsResult = await supabase.from("stat_cards").upsert(payload, { onConflict: "user_id" });
+  if (statsResult.error) throw statsResult.error;
+  const rollResult = await supabase.from("stress_rolls").insert({
+    user_id: userId,
+    die_size: 4,
+    rolled,
+    previous_stress: previousStress,
+    resulting_stress: resultingStress,
+    created_by: state.session.user.id,
+  });
+  if (rollResult.error) throw rollResult.error;
+  return { rolled, resulting_stress: resultingStress };
 }
 
 function animateDie() {
@@ -6441,20 +6566,32 @@ async function resolveImageInput(formData, fileField, currentUrl, folder) {
 
 async function uploadImage(file, folder) {
   if (!hasFile(file)) return "";
-  if (!file.type.startsWith("image/")) throw new Error("El archivo debe ser una imagen.");
+  validateImageFile(file);
   if (file.size > 5 * 1024 * 1024) throw new Error("La imagen debe pesar menos de 5MB.");
   const processed = await stylizeImageFile(file);
   if (!hasSupabase) return blobToDataUrl(processed);
 
   const path = `${folder}/${state.session.user.id}/${Date.now()}-${uuid()}.jpg`;
-  const { error } = await supabase.storage.from(IMAGE_BUCKET).upload(path, processed, {
-    cacheControl: "3600",
-    contentType: "image/jpeg",
-    upsert: true,
-  });
+  const { error } = await withTimeout(
+    supabase.storage.from(IMAGE_BUCKET).upload(path, processed, {
+      cacheControl: "3600",
+      contentType: "image/jpeg",
+      upsert: true,
+    }),
+    SAVE_TIMEOUT_MS,
+    "La subida de imagen ha tardado demasiado.",
+  );
   if (error) throw error;
   const { data } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(path);
   return data.publicUrl;
+}
+
+function validateImageFile(file) {
+  const lowerName = String(file.name || "").toLowerCase();
+  const hasKnownExtension = ACCEPTED_IMAGE_EXTENSIONS.some((extension) => lowerName.endsWith(extension));
+  if (!ACCEPTED_IMAGE_TYPES.has(file.type) && !hasKnownExtension) {
+    throw new Error("Formato de imagen no valido. Usa jpg, jpeg, png, webp o gif.");
+  }
 }
 
 async function stylizeImageFile(file) {
@@ -6801,9 +6938,9 @@ function playSfx(kind = "click") {
 }
 
 async function reloadAndToast(message, type = "success") {
-  await loadAll();
+  await withTimeout(loadAll(), SAVE_TIMEOUT_MS, "Se guardo, pero la recarga de datos ha tardado demasiado.");
   showToast(message, type);
-  render();
+  render({ preserveScroll: true });
 }
 
 function showToast(message, type = "info") {
@@ -6839,6 +6976,118 @@ function ensureDM() {
 
 function setBusy(value) {
   state.busy = value;
+}
+
+function startAutoRefresh() {
+  if (startAutoRefresh.timer) window.clearInterval(startAutoRefresh.timer);
+  startAutoRefresh.timer = window.setInterval(async () => {
+    if (!state.session || state.isPolling || state.busy || shouldPauseAutoRefresh()) return;
+    try {
+      state.isPolling = true;
+      await withTimeout(loadAll(), DATA_POLL_MS - 1000, "La actualizacion automatica ha tardado demasiado.");
+      state.lastPollAt = Date.now();
+      render({ preserveScroll: true });
+    } catch (error) {
+      console.warn("Auto refresh skipped:", error);
+    } finally {
+      state.isPolling = false;
+    }
+  }, DATA_POLL_MS);
+}
+
+function shouldPauseAutoRefresh() {
+  if (document.visibilityState === "hidden") return true;
+  const active = document.activeElement;
+  const activeTag = active?.tagName;
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(activeTag) || active?.isContentEditable) return true;
+  if (app.querySelector(".form-grid.is-saving")) return true;
+  if (state.paintingMap) return true;
+  return Boolean(
+    state.editingEventId ||
+      state.editingNoteId ||
+      state.editingLoreId ||
+      state.editingShopItemId ||
+      state.editingContractId ||
+      state.editingInventoryContainerId ||
+      state.editingInventoryItemId ||
+      state.editingCraftResourceId ||
+      state.editingCraftRecipeId ||
+      state.editingCraftUpgradeId,
+  );
+}
+
+function captureScrollState() {
+  if (!app?.isConnected) return null;
+  const selectors = [
+    ".content",
+    ".route-shell",
+    ".panel-body",
+    ".timeline-wrap",
+    ".battle-map-scroll",
+    ".battle-tool-surface",
+    ".lore-list",
+    ".notes-list",
+    ".hunger-scroll",
+    ".contracts-board",
+    ".dice-log",
+    ".roster-scroll",
+    ".entity-scroll",
+    ".inventory-container-list",
+    ".intel-dossier",
+    ".informant-grid",
+    ".location-grid",
+    ".route-grid",
+    ".event-grid",
+    ".decision-stack",
+    ".infiltration-log",
+  ].join(",");
+  return {
+    route: state.route,
+    windowX: window.scrollX,
+    windowY: window.scrollY,
+    items: [...app.querySelectorAll(selectors)].map((node, index) => ({
+      index,
+      top: node.scrollTop,
+      left: node.scrollLeft,
+    })),
+  };
+}
+
+function restoreScrollState(snapshot) {
+  if (!snapshot || snapshot.route !== state.route) return;
+  window.requestAnimationFrame(() => {
+    const selectors = [
+      ".content",
+      ".route-shell",
+      ".panel-body",
+      ".timeline-wrap",
+      ".battle-map-scroll",
+      ".battle-tool-surface",
+      ".lore-list",
+      ".notes-list",
+      ".hunger-scroll",
+      ".contracts-board",
+      ".dice-log",
+      ".roster-scroll",
+      ".entity-scroll",
+      ".inventory-container-list",
+      ".intel-dossier",
+      ".informant-grid",
+      ".location-grid",
+      ".route-grid",
+      ".event-grid",
+      ".decision-stack",
+      ".infiltration-log",
+    ].join(",");
+    const nodes = [...app.querySelectorAll(selectors)];
+    snapshot.items.forEach((item) => {
+      const node = nodes[item.index];
+      if (!node) return;
+      node.scrollTop = item.top;
+      node.scrollLeft = item.left;
+    });
+    window.scrollTo(snapshot.windowX, snapshot.windowY);
+  });
 }
 
 function setFormSaving(form, value) {
@@ -6894,6 +7143,14 @@ function labelize(key) {
 
 function wait(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function withTimeout(promise, ms = SAVE_TIMEOUT_MS, message = "La operacion ha tardado demasiado. Revisa conexion y vuelve a intentarlo.") {
+  let timer = 0;
+  const timeout = new Promise((_, reject) => {
+    timer = window.setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timer));
 }
 
 function uuid() {

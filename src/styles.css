@@ -1365,7 +1365,8 @@ select:focus {
 }
 
 .battle-map {
-  --cell-size: 42px;
+  --base-cell-size: 42px;
+  --cell-size: calc(var(--base-cell-size) * var(--map-zoom, 1));
   width: max(100%, calc(var(--map-w) * var(--cell-size)));
   min-width: max(100%, calc(var(--map-w) * 30px));
   min-height: max(420px, calc(var(--map-h) * 30px));
@@ -4672,7 +4673,8 @@ button:disabled:hover {
 }
 
 .battle-map {
-  --cell-size: 64px;
+  --base-cell-size: 64px;
+  --cell-size: calc(var(--base-cell-size) * var(--map-zoom, 1));
   min-height: max(640px, calc(var(--map-h) * 52px));
   background-repeat: no-repeat !important;
   background-size: 100% 100% !important;
@@ -4821,7 +4823,8 @@ button:disabled:hover {
   }
 
   .battle-map {
-    --cell-size: 48px;
+    --base-cell-size: 48px;
+    --cell-size: calc(var(--base-cell-size) * var(--map-zoom, 1));
     min-height: max(440px, calc(var(--map-h) * 38px));
   }
 }
