@@ -1,7 +1,10 @@
-import { SUPABASE_ANON_KEY, SUPABASE_AUTH_REDIRECT_URL, SUPABASE_URL } from "./config.js";
+import * as appConfig from "./config.js";
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.106.2/+esm";
 
 const app = document.querySelector("#app");
+const SUPABASE_URL = appConfig.SUPABASE_URL || "";
+const SUPABASE_ANON_KEY = appConfig.SUPABASE_ANON_KEY || "";
+const SUPABASE_AUTH_REDIRECT_URL = appConfig.SUPABASE_AUTH_REDIRECT_URL || "";
 const hasSupabase = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY && SUPABASE_URL.startsWith("https://"));
 const supabase = hasSupabase ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
@@ -4914,7 +4917,7 @@ async function saveStats(formData) {
   payload.stress = Math.min(Number(payload.stress || 0), Number(payload.stress_max || 10));
 
   if (hasSupabase) {
-    const { error } = await supabase.from("stat_cards").upsert(payload, { onConflict: "user_id" });
+    const { error } = await upsertStatCard(payload);
     if (error) throw error;
   } else {
     const data = readJson(DEMO_DATA_KEY);
@@ -4950,7 +4953,7 @@ async function savePlayerStats(formData) {
     updated_at: new Date().toISOString(),
   });
   if (hasSupabase) {
-    const { error } = await supabase.from("stat_cards").upsert(payload, { onConflict: "user_id" });
+    const { error } = await upsertStatCard(payload);
     if (error) throw error;
   } else {
     const data = readJson(DEMO_DATA_KEY);
@@ -4960,6 +4963,28 @@ async function savePlayerStats(formData) {
     saveDemo(data);
   }
   await reloadAndToast("Tus datos estan actualizados.");
+}
+
+async function upsertStatCard(payload) {
+  const row = normalizeStatCardWrite(payload);
+  const first = await supabase.from("stat_cards").upsert(row, { onConflict: "user_id" });
+  if (!isMissingSchemaColumn(first.error, "stress_max", "stat_cards") || !("stress_max" in row)) return first;
+
+  console.warn("Supabase no tiene stress_max en stat_cards; reintentando sin esa columna. Ejecuta supabase/schema.sql para activar Stress max persistente.");
+  const fallback = { ...row };
+  delete fallback.stress_max;
+  return supabase.from("stat_cards").upsert(fallback, { onConflict: "user_id" });
+}
+
+function normalizeStatCardWrite(card) {
+  const row = { ...(card || {}) };
+  if (!row.id || row.id === "null" || row.id === "undefined") delete row.id;
+  return row;
+}
+
+function isMissingSchemaColumn(error, column, table) {
+  const raw = String(error?.message || error?.details || error?.hint || error?.code || "").toLowerCase();
+  return Boolean(error) && raw.includes(column.toLowerCase()) && raw.includes(table.toLowerCase());
 }
 
 async function saveProfile(formData) {
@@ -5223,7 +5248,7 @@ async function saveSoulCoins(formData) {
     updated_at: new Date().toISOString(),
   });
   if (hasSupabase) {
-    const { error } = await supabase.from("stat_cards").upsert(payload, { onConflict: "user_id" });
+    const { error } = await upsertStatCard(payload);
     if (error) throw error;
   } else {
     const data = readJson(DEMO_DATA_KEY);
@@ -5288,7 +5313,7 @@ async function requestInitiative() {
     const card = state.data.stats.find((item) => item.user_id === profile.id) || defaultStats(profile.id, profile);
     const current = existing.find((combatant) => combatant.user_id === profile.id);
     return compact({
-      id: current?.id,
+      id: current?.id || uuid(),
       user_id: profile.id,
       type: "player",
       map_id: activeBattleMap(getBattleState()).id,
@@ -5301,6 +5326,7 @@ async function requestInitiative() {
       ac: card.ac,
       position_x: current?.position_x ?? index,
       position_y: current?.position_y ?? 6,
+      created_by: current?.created_by || state.session.user.id,
       updated_by: state.session.user.id,
       updated_at: new Date().toISOString(),
     });
@@ -5310,7 +5336,7 @@ async function requestInitiative() {
     const stateResult = await supabase.from("battle_states").upsert({ id: "main", initiative_requested: true, active_combatant_id: null, round: 1, updated_by: state.session.user.id }, { onConflict: "id" });
     if (stateResult.error) throw stateResult.error;
     if (rows.length) {
-      const { error } = await supabase.from("battle_combatants").upsert(rows, { onConflict: "user_id" });
+      const { error } = await upsertCombatants(rows);
       if (error) throw error;
     }
   } else {
@@ -5348,8 +5374,9 @@ async function saveInitiative(formData) {
     };
   }
   const payload = { ...combatant, initiative, updated_at: new Date().toISOString() };
+  payload.id ||= uuid();
   if (hasSupabase) {
-    const { error } = await supabase.from("battle_combatants").upsert(payload, { onConflict: "user_id" });
+    const { error } = await upsertCombatants(payload);
     if (error) throw error;
   } else {
     const data = readJson(DEMO_DATA_KEY);
@@ -5360,6 +5387,17 @@ async function saveInitiative(formData) {
   }
   await maybeSetFirstTurn();
   await reloadAndToast("Iniciativa enviada.");
+}
+
+async function upsertCombatants(rows) {
+  const cleanRows = Array.isArray(rows) ? rows.map(normalizeCombatantWrite) : normalizeCombatantWrite(rows);
+  return supabase.from("battle_combatants").upsert(cleanRows, { onConflict: "user_id" });
+}
+
+function normalizeCombatantWrite(combatant) {
+  const row = { ...(combatant || {}) };
+  if (!row.id || row.id === "null" || row.id === "undefined") row.id = uuid();
+  return row;
 }
 
 async function saveMonster(formData) {
@@ -5947,7 +5985,7 @@ async function buyShopItem(offerId) {
     if (!statPayload.id) delete statPayload.id;
     let result = stats.id
       ? await supabase.from("stat_cards").update({ soul_coins: updatedStats.soul_coins }).eq("id", stats.id)
-      : await supabase.from("stat_cards").upsert(statPayload, { onConflict: "user_id" });
+      : await upsertStatCard(statPayload);
     if (result.error) throw result.error;
     result = await supabase.from("infernal_shop").upsert({ ...shop, offers: updatedOffers }, { onConflict: "id" });
     if (result.error) throw result.error;
@@ -6038,7 +6076,7 @@ async function buyCraftUpgrade(upgradeId, ownerId) {
   if (hasSupabase) {
     const statPayload = { ...updatedStats, user_id: targetUserId };
     if (!statPayload.id) delete statPayload.id;
-    const { error } = await supabase.from("stat_cards").upsert(statPayload, { onConflict: "user_id" });
+    const { error } = await upsertStatCard(statPayload);
     if (error) throw error;
   } else {
     const data = readJson(DEMO_DATA_KEY);
@@ -6568,7 +6606,7 @@ async function applyStressRollSupabase(userId) {
     updated_by: state.session.user.id,
     updated_at: new Date().toISOString(),
   });
-  const statsResult = await supabase.from("stat_cards").upsert(payload, { onConflict: "user_id" });
+  const statsResult = await upsertStatCard(payload);
   if (statsResult.error) throw statsResult.error;
   const rollResult = await supabase.from("stress_rolls").insert({
     user_id: userId,
