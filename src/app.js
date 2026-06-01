@@ -916,6 +916,7 @@ const state = {
   editingShopItemId: null,
   editingContractId: null,
   editingInventoryContainerId: null,
+  editingInventoryItemId: null,
   editingCraftResourceId: null,
   editingCraftRecipeId: null,
   editingCraftUpgradeId: null,
@@ -2651,18 +2652,10 @@ function renderInventory() {
   const ownerStats = state.data.stats.find((card) => card.user_id === ownerId) || defaultStats(ownerId, state.data.profiles.find((p) => p.id === ownerId));
   const containers = inventoryContainersFor(ownerId);
   const selectedItem = ownerItems.find((item) => item.id === state.selectedInventoryItemId) || ownerItems[0] || null;
+  if (state.editingInventoryItemId && !ownerItems.some((item) => item.id === state.editingInventoryItemId)) state.editingInventoryItemId = null;
   state.selectedInventoryItemId = selectedItem?.id || null;
   return `
     <section class="inventory-layout">
-      <aside class="panel">
-        <div class="panel-header"><h3>${icon("coins")} Monedas de alma</h3><span class="status-pill">${escapeHtml(ownerStats.soul_coins || 0)}</span></div>
-        <div class="panel-body">
-          ${isDM() ? renderOwnerPicker(ownerId) : ""}
-          ${isDM() ? renderSoulCoinForm(ownerId, ownerStats) : ""}
-          ${renderInventoryContainerManager(ownerId, containers)}
-          ${renderInventoryForm(ownerId, containers)}
-        </div>
-      </aside>
       <div class="panel inventory-matrix-panel">
         <div class="panel-header"><h3>${icon("boxes")} Inventario</h3><span class="status-pill">${ownerItems.length} objetos</span></div>
         <div class="panel-body">
@@ -2672,6 +2665,21 @@ function renderInventory() {
       <aside class="panel inventory-detail-panel">
         <div class="panel-header"><h3>${icon("search")} Detalle</h3></div>
         <div class="panel-body">${selectedItem ? renderItemDetail(selectedItem) : renderEmpty("Clica un cubo del inventario.")}</div>
+      </aside>
+      <aside class="panel inventory-coins-panel">
+        <div class="panel-header"><h3>${icon("coins")} Monedas de alma</h3><span class="status-pill">${escapeHtml(ownerStats.soul_coins || 0)}</span></div>
+        <div class="panel-body">
+          ${isDM() ? renderOwnerPicker(ownerId) : `<div class="soul-readout">${icon("coins")} ${escapeHtml(ownerStats.soul_coins || 0)} monedas de alma</div>`}
+          ${isDM() ? renderSoulCoinForm(ownerId, ownerStats) : renderEmpty("El DM controla tus monedas de alma.")}
+        </div>
+      </aside>
+      <aside class="panel inventory-item-panel">
+        <div class="panel-header"><h3>${icon(state.editingInventoryItemId ? "pencil" : "package-plus")} ${state.editingInventoryItemId ? "Editar objeto" : "Anadir objeto"}</h3></div>
+        <div class="panel-body">${renderInventoryForm(ownerId, containers)}</div>
+      </aside>
+      <aside class="panel inventory-container-panel">
+        <div class="panel-header"><h3>${icon("archive")} Almacenaje</h3></div>
+        <div class="panel-body">${renderInventoryContainerManager(ownerId, containers)}</div>
       </aside>
     </section>
   `;
@@ -2717,21 +2725,29 @@ function renderOwnerPicker(ownerId) {
 }
 
 function renderInventoryForm(ownerId, containers = inventoryContainersFor(ownerId)) {
+  const editing = state.data.inventory.find((item) => item.id === state.editingInventoryItemId && (isDM() || item.user_id === state.session.user.id));
   const loreOptions = visibleLoreEntries().map((entry) => ({ value: entry.id, label: entry.title }));
+  const selectedLore = editing?.lore_ids || [];
+  const selectedStorage = editing?.storage_slot || remembered("storage_slot", "mochila");
+  const selectedRarity = editing?.rarity || remembered("rarity", "mundane");
   return `
     <form class="form-grid" data-form="inventory">
-      <h3>Anadir objeto</h3>
+      <input type="hidden" name="id" value="${escapeAttr(editing?.id || "")}" />
       <input type="hidden" name="user_id" value="${escapeAttr(ownerId)}" />
-      <label class="field"><span>Nombre</span><input name="name" required /></label>
+      <input type="hidden" name="current_image_url" value="${escapeAttr(editing?.image_url || "")}" />
+      <label class="field"><span>Nombre</span><input name="name" value="${escapeAttr(editing?.name || "")}" required /></label>
       <label class="field"><span>Imagen</span><input name="image_file" type="file" accept="image/*" /></label>
       <div class="grid-2">
-        <label class="field"><span>Rareza</span><select name="rarity">${Object.entries(rarityMeta).map(([key, meta]) => `<option value="${key}" ${selectedOption("rarity", key, "mundane")}>${meta.label}</option>`).join("")}</select></label>
-        <label class="field"><span>Cantidad</span><input name="quantity" type="number" value="1" min="1" /></label>
+        <label class="field"><span>Rareza</span><select name="rarity">${Object.entries(rarityMeta).map(([key, meta]) => `<option value="${key}" ${String(selectedRarity) === key ? "selected" : ""}>${meta.label}</option>`).join("")}</select></label>
+        <label class="field"><span>Cantidad</span><input name="quantity" type="number" value="${escapeAttr(editing?.quantity || 1)}" min="1" /></label>
       </div>
-      <label class="field"><span>Almacenaje</span><select name="storage_slot">${containers.map((container) => `<option value="${escapeAttr(container.id)}" ${selectedOption("storage_slot", container.id, "mochila")}>${escapeHtml(container.name)}</option>`).join("")}</select></label>
-      <label class="field"><span>Vincular lore</span>${renderCheckList("lore_ids", loreOptions, [])}</label>
-      <label class="field"><span>Descripcion</span><textarea name="description"></textarea></label>
-      <button class="primary" type="submit">${icon("package-plus")} Guardar objeto</button>
+      <label class="field"><span>Almacenaje</span><select name="storage_slot">${containers.map((container) => `<option value="${escapeAttr(container.id)}" ${String(selectedStorage) === String(container.id) ? "selected" : ""}>${escapeHtml(container.name)}</option>`).join("")}</select></label>
+      <label class="field"><span>Vincular lore</span>${renderCheckList("lore_ids", loreOptions, selectedLore)}</label>
+      <label class="field"><span>Descripcion</span><textarea name="description">${escapeHtml(editing?.description || "")}</textarea></label>
+      <div class="form-actions">
+        <button class="primary" type="submit">${icon(editing ? "save" : "package-plus")} ${editing ? "Guardar cambios" : "Guardar objeto"}</button>
+        ${editing ? `<button type="button" class="ghost" data-action="cancel-inventory-item">${icon("x")} Cancelar</button>` : ""}
+      </div>
     </form>
   `;
 }
@@ -2812,6 +2828,7 @@ function renderItemCube(item, selected) {
 function renderItemDetail(item) {
   const rarity = rarityMeta[item.rarity || "mundane"] || rarityMeta.mundane;
   const links = (item.lore_ids || []).map((id) => state.data.lore.find((entry) => entry.id === id)).filter(Boolean);
+  const canManage = isDM() || item.user_id === state.session.user.id;
   return `
     <article class="item-card item-detail-card" style="--rarity:${escapeAttr(rarity.color)}">
       ${item.image_url ? `<img src="${escapeAttr(item.image_url)}" alt="" />` : `<div class="item-rune">${icon("package")}</div>`}
@@ -2821,6 +2838,14 @@ function renderItemDetail(item) {
         <span class="status-pill">${icon("boxes")} ${escapeHtml(storageLabel(item.storage_slot || "mochila", item.user_id))}</span>
         <p>${escapeHtml(item.description || "")}</p>
         <div class="detail-meta">${links.map((entry) => `<button type="button" class="tag" data-action="open-lore" data-id="${entry.id}">${icon(loreTypes[entry.type]?.icon || "link")} ${escapeHtml(entry.title)}</button>`).join("")}</div>
+        ${
+          canManage
+            ? `<div class="card-actions">
+                <button type="button" class="ghost" data-action="edit-inventory-item" data-id="${escapeAttr(item.id)}">${icon("pencil")} Editar</button>
+                <button type="button" class="danger" data-action="delete-inventory-item" data-id="${escapeAttr(item.id)}">${icon("trash-2")} Borrar</button>
+              </div>`
+            : ""
+        }
       </div>
     </article>
   `;
@@ -3960,6 +3985,18 @@ async function onClick(event) {
           state.selectedInventoryItemId = id;
           render();
           break;
+        case "edit-inventory-item":
+          state.editingInventoryItemId = id;
+          state.selectedInventoryItemId = id;
+          render();
+          break;
+        case "cancel-inventory-item":
+          state.editingInventoryItemId = null;
+          render();
+          break;
+        case "delete-inventory-item":
+          await deleteInventoryItem(id);
+          break;
         case "edit-inventory-container":
           state.editingInventoryContainerId = id;
           render();
@@ -4057,7 +4094,8 @@ async function onClick(event) {
       render();
     }
   } catch (error) {
-    showToast(error.message || "Accion no completada.");
+    console.error("Accion no completada:", error);
+    showToast(error.message || "Accion no completada.", "error");
     render();
   }
 }
@@ -4066,9 +4104,14 @@ async function onSubmit(event) {
   const form = event.target.closest("form[data-form]");
   if (!form) return;
   event.preventDefault();
+  if (state.busy) {
+    showToast("Espera a que termine el guardado anterior.", "warning");
+    return;
+  }
   const formData = new FormData(form);
   try {
     setBusy(true);
+    setFormSaving(form, true);
     playSfx(form.dataset.form);
     if (form.dataset.form === "login") await signIn(formData);
     if (form.dataset.form === "signup") await signUp(formData);
@@ -4106,8 +4149,10 @@ async function onSubmit(event) {
       });
     }
   } catch (error) {
-    showToast(error.message || "Algo fallo al guardar.");
+    console.error(`Error guardando ${formLabel(form)}:`, error);
+    showToast(error.message || "Algo fallo al guardar.", "error");
   } finally {
+    setFormSaving(form, false);
     setBusy(false);
   }
 }
@@ -4154,6 +4199,7 @@ async function onChange(event) {
       state.selectedStatsUserId = event.target.value;
       state.selectedInventoryItemId = null;
       state.editingInventoryContainerId = null;
+      state.editingInventoryItemId = null;
       saveUiState({ selectedStatsUserId: state.selectedStatsUserId });
       render();
       return;
@@ -4162,7 +4208,8 @@ async function onChange(event) {
       await setActiveBattleMap(event.target.value);
     }
   } catch (error) {
-    showToast(error.message || "No se pudo aplicar el cambio.");
+    console.error("No se pudo aplicar el cambio:", error);
+    showToast(error.message || "No se pudo aplicar el cambio.", "error");
     render();
   }
 }
@@ -4708,7 +4755,13 @@ async function toggleMemory(profileId, memoryId) {
 
 async function saveInventoryItem(formData) {
   const userId = isDM() ? String(formData.get("user_id") || state.session.user.id) : state.session.user.id;
-  const imageUrl = await resolveImageInput(formData, "image_file", "", "inventory");
+  if (!userId) throw new Error("Selecciona un personaje para guardar el objeto.");
+  const id = String(formData.get("id") || "");
+  const existing = id ? state.data.inventory.find((item) => item.id === id) : null;
+  if (id && !existing) throw new Error("No encuentro ese objeto para editar.");
+  if (existing && !isDM() && existing.user_id !== state.session.user.id) throw new Error("Solo puedes editar tus objetos.");
+  const currentImage = String(formData.get("current_image_url") || existing?.image_url || "");
+  const imageUrl = await resolveImageInput(formData, "image_file", currentImage, "inventory");
   const payload = {
     user_id: userId,
     name: String(formData.get("name") || "").trim(),
@@ -4718,19 +4771,30 @@ async function saveInventoryItem(formData) {
     storage_slot: String(formData.get("storage_slot") || "mochila"),
     lore_ids: formData.getAll("lore_ids").map(String),
     description: String(formData.get("description") || "").trim(),
-    created_by: state.session.user.id,
-    created_at: new Date().toISOString(),
+    updated_by: state.session.user.id,
+    updated_at: new Date().toISOString(),
   };
   if (!payload.name) throw new Error("El objeto necesita nombre.");
   if (hasSupabase) {
-    const { error } = await supabase.from("inventory_items").insert(payload);
+    const result = id
+      ? await supabase.from("inventory_items").update(payload).eq("id", id)
+      : await supabase.from("inventory_items").insert({ ...payload, created_by: state.session.user.id, created_at: new Date().toISOString() });
+    const { error } = result;
     if (error) throw error;
   } else {
     const data = readJson(DEMO_DATA_KEY);
-    data.inventory.unshift({ ...payload, id: uuid() });
+    if (id) {
+      data.inventory = data.inventory.map((item) => (item.id === id ? { ...item, ...payload } : item));
+    } else {
+      const newId = uuid();
+      data.inventory.unshift({ ...payload, id: newId, created_by: state.session.user.id, created_at: new Date().toISOString() });
+      state.selectedInventoryItemId = newId;
+    }
     saveDemo(data);
   }
-  await reloadAndToast("Objeto anadido al inventario.");
+  if (id) state.selectedInventoryItemId = id;
+  state.editingInventoryItemId = null;
+  await reloadAndToast(id ? "Objeto actualizado." : "Objeto anadido al inventario.");
 }
 
 async function saveInventoryContainer(formData) {
@@ -4789,6 +4853,24 @@ async function deleteInventoryContainer(id) {
   }
   state.editingInventoryContainerId = null;
   await reloadAndToast("Contenedor borrado.");
+}
+
+async function deleteInventoryItem(id) {
+  const item = state.data.inventory.find((entry) => entry.id === id);
+  if (!item) throw new Error("No encuentro ese objeto.");
+  if (!isDM() && item.user_id !== state.session.user.id) throw new Error("Solo puedes borrar tus objetos.");
+  if (!confirm(`Borrar el objeto "${item.name}"?`)) return;
+  if (hasSupabase) {
+    const { error } = await supabase.from("inventory_items").delete().eq("id", id);
+    if (error) throw error;
+  } else {
+    const data = readJson(DEMO_DATA_KEY);
+    data.inventory = (data.inventory || []).filter((entry) => entry.id !== id);
+    saveDemo(data);
+  }
+  if (state.selectedInventoryItemId === id) state.selectedInventoryItemId = null;
+  if (state.editingInventoryItemId === id) state.editingInventoryItemId = null;
+  await reloadAndToast("Objeto borrado.");
 }
 
 async function saveSoulCoins(formData) {
@@ -6718,14 +6800,14 @@ function playSfx(kind = "click") {
   }
 }
 
-async function reloadAndToast(message) {
+async function reloadAndToast(message, type = "success") {
   await loadAll();
-  showToast(message);
+  showToast(message, type);
   render();
 }
 
-function showToast(message) {
-  state.toast = message;
+function showToast(message, type = "info") {
+  state.toast = { message: String(message || ""), type };
   window.clearTimeout(showToast.timer);
   showToast.timer = window.setTimeout(() => {
     state.toast = "";
@@ -6734,7 +6816,9 @@ function showToast(message) {
 }
 
 function renderToast() {
-  return state.toast ? `<div class="toast" role="status">${escapeHtml(state.toast)}</div>` : "";
+  if (!state.toast) return "";
+  const toast = typeof state.toast === "string" ? { message: state.toast, type: "info" } : state.toast;
+  return `<div class="toast toast-${escapeAttr(toast.type || "info")}" role="status">${escapeHtml(toast.message || "")}</div>`;
 }
 
 function renderBanner(text) {
@@ -6755,6 +6839,37 @@ function ensureDM() {
 
 function setBusy(value) {
   state.busy = value;
+}
+
+function setFormSaving(form, value) {
+  if (!form) return;
+  form.classList.toggle("is-saving", Boolean(value));
+  form.setAttribute("aria-busy", value ? "true" : "false");
+  const controls = form.querySelectorAll("button, input, select, textarea");
+  controls.forEach((control) => {
+    if (control.type === "file") return;
+    if (value) {
+      if (!control.dataset.wasDisabled) control.dataset.wasDisabled = control.disabled ? "true" : "false";
+      control.disabled = true;
+    } else {
+      control.disabled = control.dataset.wasDisabled === "true";
+      delete control.dataset.wasDisabled;
+    }
+  });
+  const submit = form.querySelector('button[type="submit"]');
+  if (!submit) return;
+  if (value) {
+    if (!submit.dataset.originalHtml) submit.dataset.originalHtml = submit.innerHTML;
+    submit.innerHTML = `${icon("loader-circle")} Guardando...`;
+  } else if (submit.dataset.originalHtml) {
+    submit.innerHTML = submit.dataset.originalHtml;
+    delete submit.dataset.originalHtml;
+  }
+  refreshIcons();
+}
+
+function formLabel(form) {
+  return form?.dataset?.form || "formulario";
 }
 
 function numberValue(value) {

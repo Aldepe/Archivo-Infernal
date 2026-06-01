@@ -4421,3 +4421,438 @@ button:disabled:hover {
     grid-template-columns: 1fr;
   }
 }
+
+/* UX containment pass: long data scrolls inside panels instead of breaking the page. */
+.content,
+.panel,
+.panel-body,
+.form-grid,
+.field,
+.battle-tool-surface,
+.contract-stage {
+  min-width: 0;
+}
+
+.panel {
+  min-height: 0;
+}
+
+.panel-body {
+  min-height: 0;
+}
+
+.form-grid.is-saving {
+  opacity: 0.82;
+}
+
+.form-grid.is-saving button[type="submit"] i {
+  animation: saving-spin 900ms linear infinite;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: min(420px, calc(100vw - 32px));
+}
+
+.toast-success {
+  border-color: rgba(84, 217, 210, 0.56);
+  box-shadow: 0 0 28px rgba(84, 217, 210, 0.16);
+}
+
+.toast-error {
+  border-color: rgba(255, 53, 26, 0.72);
+  background:
+    linear-gradient(90deg, rgba(255, 53, 26, 0.26), rgba(0, 0, 0, 0.86)),
+    rgba(0, 0, 0, 0.96);
+  box-shadow: 0 0 34px rgba(255, 53, 26, 0.22);
+}
+
+.toast-warning {
+  border-color: rgba(244, 179, 61, 0.66);
+  box-shadow: 0 0 30px rgba(244, 179, 61, 0.16);
+}
+
+.soul-readout {
+  min-height: 96px;
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 18px;
+  border: 1px solid rgba(244, 179, 61, 0.38);
+  background:
+    radial-gradient(circle at 50% 0, rgba(244, 179, 61, 0.22), transparent 50%),
+    rgba(4, 4, 4, 0.92);
+  color: var(--gold);
+  font-family: var(--serif);
+  font-size: 1.2rem;
+  text-align: center;
+}
+
+.inventory-coins-panel {
+  grid-area: inventory-coins;
+}
+
+.inventory-item-panel {
+  grid-area: inventory-item;
+}
+
+.inventory-container-panel {
+  grid-area: inventory-container;
+}
+
+.inventory-layout > .panel {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+}
+
+.inventory-layout > .panel > .panel-body {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.inventory-detail-panel {
+  position: static;
+}
+
+.inventory-containers-editor {
+  margin: 0;
+  min-height: 0;
+}
+
+.inventory-container-list {
+  max-height: min(28vh, 300px);
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.item-detail-card {
+  height: 100%;
+  align-content: start;
+}
+
+.lore-layout,
+.notes-layout,
+.contracts-layout,
+.hunger-layout,
+.infiltration-command,
+.infiltration-grid,
+.infiltration-grid.wide,
+.infiltration-dm-grid,
+.mic-magic-grid {
+  align-items: stretch;
+}
+
+.lore-layout > .panel,
+.notes-layout > .panel,
+.hunger-layout > .panel,
+.contracts-layout > .panel,
+.contracts-layout > .contract-stage,
+.infiltration-command > .panel,
+.infiltration-grid > .panel,
+.infiltration-grid.wide > .panel,
+.infiltration-dm-grid > .panel,
+.mic-magic-grid > .panel {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.lore-layout > .panel > .panel-body,
+.notes-layout > .panel > .panel-body,
+.hunger-layout > .panel > .panel-body,
+.contracts-layout > .panel > .panel-body,
+.infiltration-screen .panel > .panel-body,
+.infiltration-screen .panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.lore-list,
+.notes-list,
+.hunger-scroll,
+.contracts-board,
+.intel-dossier,
+.informant-grid,
+.location-grid,
+.route-grid,
+.event-grid,
+.decision-stack,
+.spell-grid,
+.checkpoint-grid,
+.infiltration-log,
+.objective-track,
+.preparation-grid {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.hunger-scroll,
+.contracts-board {
+  max-height: none;
+}
+
+.contract-stage {
+  grid-template-rows: minmax(220px, 300px) minmax(0, 1fr);
+}
+
+.contract-ritual {
+  min-height: 0;
+  height: 100%;
+}
+
+.battle-layout {
+  grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
+  grid-template-areas:
+    "battle-roster battle-map"
+    "battle-tools battle-tools"
+    "battle-entities battle-entities";
+  align-items: stretch;
+}
+
+.battle-roster-panel {
+  grid-area: battle-roster;
+}
+
+.battle-map-panel {
+  grid-area: battle-map;
+}
+
+.battle-design-panel {
+  grid-area: battle-tools;
+}
+
+.battle-entities-panel {
+  grid-area: battle-entities;
+}
+
+.battle-roster-panel,
+.battle-design-panel {
+  position: static;
+  max-height: none;
+  overflow: hidden;
+}
+
+.battle-roster-panel,
+.battle-map-panel,
+.battle-design-panel,
+.battle-entities-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.battle-roster-panel .panel-body,
+.battle-map-panel .panel-body,
+.battle-design-panel .panel-body,
+.battle-entities-panel .panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.battle-map-panel .panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.battle-map-scroll {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  max-height: none;
+  overflow: auto;
+}
+
+.battle-map {
+  --cell-size: 64px;
+  min-height: max(640px, calc(var(--map-h) * 52px));
+  background-repeat: no-repeat !important;
+  background-size: 100% 100% !important;
+  background-position: center !important;
+}
+
+.battle-design-panel .panel-body,
+.battle-entities-panel .panel-body {
+  display: grid;
+  gap: 16px;
+  align-items: stretch;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.battle-design-panel .panel-body {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.battle-entities-panel .panel-body {
+  grid-template-columns: minmax(260px, 0.9fr) minmax(300px, 1fr) minmax(0, 1.35fr);
+}
+
+.battle-tool-surface {
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.roster-columns {
+  flex: 1;
+  min-height: 0;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.roster-scroll,
+.entity-scroll,
+.combatant-list,
+.compact-combatants {
+  min-height: 0;
+}
+
+.roster-scroll,
+.entity-scroll {
+  max-height: none;
+  overflow-y: auto;
+}
+
+.battle-tools {
+  flex-wrap: wrap;
+}
+
+.dice-log {
+  max-height: min(58vh, 560px);
+}
+
+@media (min-width: 1181px) {
+  .lore-layout > .panel,
+  .notes-layout > .panel,
+  .hunger-layout > .panel,
+  .contracts-layout > .panel,
+  .contracts-layout > .contract-stage {
+    height: clamp(560px, calc(100vh - 190px), 860px);
+  }
+
+  .infiltration-command > .panel,
+  .infiltration-grid > .panel,
+  .infiltration-grid.wide > .panel,
+  .infiltration-dm-grid > .panel,
+  .mic-magic-grid > .panel {
+    height: clamp(560px, calc(100vh - 198px), 900px);
+  }
+
+  .inventory-layout {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas:
+      "inventory-matrix inventory-matrix inventory-detail"
+      "inventory-coins inventory-item inventory-container";
+    align-items: stretch;
+  }
+
+  .inventory-layout > .panel:first-child {
+    grid-area: inventory-matrix;
+  }
+
+  .inventory-matrix-panel {
+    grid-area: inventory-matrix;
+  }
+
+  .inventory-detail-panel {
+    grid-area: inventory-detail;
+  }
+
+  .inventory-matrix-panel,
+  .inventory-detail-panel {
+    height: clamp(380px, 44vh, 600px);
+  }
+
+  .inventory-coins-panel,
+  .inventory-item-panel,
+  .inventory-container-panel {
+    height: clamp(360px, 38vh, 540px);
+  }
+
+  .inventory-matrix {
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    align-content: start;
+  }
+
+  .battle-roster-panel,
+  .battle-map-panel {
+    height: clamp(640px, calc(100vh - 188px), 960px);
+  }
+
+  .battle-design-panel {
+    height: clamp(360px, 44vh, 560px);
+  }
+
+  .battle-entities-panel {
+    height: clamp(460px, 52vh, 680px);
+  }
+}
+
+@media (max-width: 1180px) {
+  .inventory-layout,
+  .battle-layout {
+    grid-template-columns: 1fr;
+    grid-template-areas: none;
+  }
+
+  .inventory-matrix-panel,
+  .inventory-detail-panel,
+  .inventory-coins-panel,
+  .inventory-item-panel,
+  .inventory-container-panel,
+  .battle-roster-panel,
+  .battle-map-panel,
+  .battle-design-panel,
+  .battle-entities-panel {
+    grid-area: auto;
+  }
+
+  .battle-design-panel .panel-body,
+  .battle-entities-panel .panel-body {
+    grid-template-columns: 1fr;
+  }
+
+  .battle-map {
+    --cell-size: 48px;
+    min-height: max(440px, calc(var(--map-h) * 38px));
+  }
+}
+
+@media (max-width: 980px) {
+  .lore-layout > .panel,
+  .notes-layout > .panel,
+  .hunger-layout > .panel,
+  .contracts-layout > .panel,
+  .contracts-layout > .contract-stage,
+  .infiltration-command > .panel,
+  .infiltration-grid > .panel,
+  .infiltration-grid.wide > .panel,
+  .infiltration-dm-grid > .panel,
+  .mic-magic-grid > .panel,
+  .inventory-matrix-panel,
+  .inventory-detail-panel,
+  .inventory-coins-panel,
+  .inventory-item-panel,
+  .inventory-container-panel,
+  .battle-roster-panel,
+  .battle-map-panel,
+  .battle-design-panel,
+  .battle-entities-panel {
+    height: auto;
+    max-height: none;
+  }
+}
+
+@keyframes saving-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
